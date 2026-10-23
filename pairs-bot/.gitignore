@@ -1,0 +1,7 @@
+.env
+*.db
+*.db-wal
+*.db-shm
+*.fallback.jsonl
+__pycache__/
+.pytest_cache/
