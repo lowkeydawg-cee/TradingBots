@@ -65,7 +65,7 @@ full day.
 *Why:* the Alpaca code path is the one part that hasn't run yet. Fix that before
 building more on top.
 
-**Step 2. Backtester with realistic costs (most important).** Replay months of
+**Step 2. Backtester with realistic costs (most important). ✅ Built: `backtest.py`, see the README.** Replay months of
 historical bars through the exact same `decide()` function. Charge the bid/ask
 spread, slippage and borrow fees on every trade, and report Sharpe ratio, maximum
 drawdown and profit per trade *after* costs.
