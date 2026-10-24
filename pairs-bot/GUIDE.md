@@ -44,10 +44,10 @@ These are my judgment calls, not measurements.
 
 | Question | Score | Why |
 |---|---|---|
-| Is the software well built? | **8/10** | Tested end to end (20 tests), with real safety rails: loss limit, stop button, leg-failure unwind, a halt that survives restarts, and no database lock-ups. It loses points because the Alpaca connection hasn't been run live yet. |
+| Is the software well built? | **8.5/10** | Tested end to end (53 tests), with real safety rails: daily, weekly and monthly loss limits, stop button, leg-failure unwind, pair retirement, a halt that survives restarts, and no database lock-ups. It loses points because the Alpaca connection, limit orders and streaming haven't been run live yet. |
 | Will it run on paper without problems? | **7/10** | Likely, after the first smoke test. Expect one or two small fixes on first contact with the real API. |
 | Will it make money as it is today? | **2–3/10** | Nothing has been backtested yet. KO/PEP on 1-minute bars is the most-watched pair there is, the edge per trade is tiny, and paying the spread on two market orders twice per round trip can eat it completely. |
-| Can it become profitable with the roadmap below? | **Maybe 15–25%** | Pairs trading is a real, documented strategy, but its edge has shrunk as more people trade it. Success depends almost entirely on step 2 (backtesting) and step 3 (picking pairs). |
+| Can it become profitable with the roadmap below? | **Maybe 20–30%** (now that steps 2–8 are built) | Pairs trading is a real, documented strategy, but its edge has shrunk as more people trade it. Success depends almost entirely on step 2 (backtesting) and step 3 (picking pairs). |
 
 The honest summary: the machine is good, but there's no evidence yet that the
 strategy it runs makes money. The next work should prove or disprove that
@@ -73,36 +73,36 @@ drawdown and profit per trade *after* costs.
 paper trades. If the backtest loses money after costs, you've saved yourself the
 trouble.
 
-**Step 3. Pair scanner with out-of-sample testing.** Scan a sector, for example
+**Step 3. Pair scanner with out-of-sample testing. ✅ Built: `scanner.py`, plus a Monte Carlo reshuffle in every backtest (`montecarlo.py`).** Scan a sector, for example
 consumer staples, banks or oil majors. Pick pairs that are cointegrated in one
 period, then check that they *stay* cointegrated in the next period
 (walk-forward testing).
 *Why:* KO/PEP was just a default. Most pairs that look cointegrated by chance
 stop working. Testing out of sample is how you avoid fooling yourself.
 
-**Step 4. Cheaper execution.** Use limit orders at or near the mid price
+**Step 4. Cheaper execution. ✅ Built: limit entries at the mid, live quotes, a spread check and slippage logging (`ORDER_TYPE=limit`, the default). `backtest.py --costs-from-db` reuses the measured costs.** Use limit orders at or near the mid price
 instead of market orders, read live quotes, and only enter when the expected
 reversion is at least about twice the round-trip cost.
 *Why:* for a strategy with small profits per trade, costs often decide whether
 it wins or loses.
 
-**Step 5. Adaptive hedge ratio (Kalman filter) and slower bars.** Let beta update
+**Step 5. Adaptive hedge ratio (Kalman filter) and slower bars. ✅ Built: `HEDGE_METHOD=kalman`, `TIMEFRAME_MINUTES`, plus a volatility filter and an earnings/news pause (`blackout.py`).** Let beta update
 smoothly instead of re-fitting a 390-bar window, and try 5- or 15-minute bars.
 *Why:* a jumpy beta creates false signals, and slower bars carry less noise
 relative to costs.
 
-**Step 6. Multiple pairs with portfolio limits.** Run 5 to 10 uncorrelated pairs,
+**Step 6. Multiple pairs with portfolio limits. ✅ Built: `PAIRS=KO:PEP,XOM:CVX,...` and optional volatility sizing (`RISK_PER_TRADE_USD`).** Run 5 to 10 uncorrelated pairs,
 each with its own kill switch, under a shared cap on gross exposure and loss.
 *Why:* one pair gives a few trades a week, which is too few to know if it works.
 Several pairs smooth the results, and one broken pair can't sink everything.
 
-**Step 7. More loss limits.** Add a weekly and a monthly loss cap on top of the
+**Step 7. More loss limits. ✅ Built: `MAX_WEEKLY_LOSS_PCT`, `MAX_MONTHLY_LOSS_PCT`, and pair retirement (`RETIRE_PVALUE`, `RETIRE_DAYS`).** Add a weekly and a monthly loss cap on top of the
 daily one, plus automatic retirement of a pair whose cointegration p-value stays
 high for N days.
 *Why:* the daily limit resets every morning, so a slow bleed over several days
 is currently unchecked.
 
-**Step 8. Run it like a service.** Host it on a small always-on server
+**Step 8. Run it like a service. ✅ Built: Docker and systemd files, streaming prices, Telegram alerts, a daily report and a nightly reconciliation job. See [DEPLOY.md](DEPLOY.md).** Host it on a small always-on server
 (a $5–10/month VPS) under systemd so it restarts after crashes. Send alerts
 (Telegram or email) on any halt, plus a daily summary.
 *Why:* a bot on a laptop stops when the laptop sleeps, and a halted bot that

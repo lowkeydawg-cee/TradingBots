@@ -7,3 +7,4 @@ __pycache__/
 .pytest_cache/
 backtest_out/
 data/
+scan_out/

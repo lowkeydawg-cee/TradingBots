@@ -1,0 +1,22 @@
+# systemd unit for running the bot without Docker. See DEPLOY.md.
+# sudo cp deploy/*.service deploy/*.timer /etc/systemd/system/ && sudo systemctl daemon-reload
+# sudo systemctl enable --now pairs-bot pairs-dashboard pairs-reconcile.timer
+[Unit]
+Description=Pairs trading bot (Alpaca paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bot
+WorkingDirectory=/opt/TradingBots/pairs-bot
+EnvironmentFile=/opt/TradingBots/pairs-bot/.env
+Environment=BOT_MODE=alpaca
+ExecStart=/opt/TradingBots/pairs-bot/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=30
+# SIGTERM lets the bot finish its cycle and close the database cleanly.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

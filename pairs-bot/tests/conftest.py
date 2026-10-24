@@ -15,7 +15,7 @@ from sim import SimBroker, SimMarket, SimMarketData  # noqa: E402
 @pytest.fixture
 def cfg(tmp_path):
     def _make(**overrides):
-        base = dict(mode="sim", poll_seconds=0.0, hedge_lookback=200, z_lookback=40,
+        base = dict(mode="sim", poll_seconds=0.0, order_type="market", hedge_lookback=200, z_lookback=40,
                     db_path=str(tmp_path / "pairs.db"))
         base.update(overrides)
         return load_settings(**base)

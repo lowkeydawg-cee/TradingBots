@@ -119,3 +119,10 @@ here, so search for them by name.
 | Backtest | Replaying history to see what the rules would have done |
 | Out-of-sample | Testing on a period you didn't use to choose the settings. The only honest kind of test |
 | Paper trading | Real market, pretend money |
+| Kalman filter | A way to let the hedge ratio drift a little every bar instead of re-fitting it from scratch. Smoother, fewer false signals |
+| Walk-forward | Choose on one period, test on the next, then move forward and repeat. What `scanner.py` does |
+| Monte Carlo | Reshuffling the backtest's trades thousands of times to see how lucky or unlucky the one real ordering was |
+| Limit order | "Buy, but only at this price or better." Cheaper than a market order, but it may not fill |
+| Mid price | Halfway between the bid and the ask. Where the bot rests its first order |
+| Slippage | How much worse your fill was than the price you expected. The bot measures it on every order |
+| Blackout | A day (earnings) or moment (breaking news) when the bot stays out of a pair on purpose |

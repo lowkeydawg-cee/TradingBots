@@ -1,0 +1,14 @@
+[Unit]
+Description=Pairs bot dashboard (Streamlit, localhost only)
+After=pairs-bot.service
+
+[Service]
+User=bot
+WorkingDirectory=/opt/TradingBots/pairs-bot
+EnvironmentFile=/opt/TradingBots/pairs-bot/.env
+ExecStart=/opt/TradingBots/pairs-bot/.venv/bin/streamlit run app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

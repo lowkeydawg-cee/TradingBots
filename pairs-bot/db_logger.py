@@ -100,6 +100,30 @@ CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
 CREATE INDEX IF NOT EXISTS ix_equity_ts ON equity(ts);
 """
 
+# Columns added after the first release. ``migrate`` adds them to older databases,
+# so an existing pairs_bot.db keeps working. Rows written before have NULL there.
+MIGRATIONS = [
+    ("signals", "pair", "TEXT"),          # "KO/PEP": which pair a row belongs to (portfolio mode)
+    ("signals", "vol_ratio", "REAL"),
+    ("pair_trades", "pair", "TEXT"),
+    ("orders", "expected_price", "REAL"),  # mid / decision price at order time
+    ("orders", "slippage_bps", "REAL"),    # what the fill cost vs. expected (+ = paid more)
+]
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    for table, column, kind in MIGRATIONS:
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+
+def slippage_bps(side: str, fill: float | None, expected: float | None) -> float | None:
+    """Positive = the fill was worse than expected (paid more on a buy, got less on a sell)."""
+    if not fill or not expected:
+        return None
+    return (fill - expected) / expected * 1e4 * (1 if side == "buy" else -1)
+
 
 class DBLogger:
     """Async writer used by the bot."""
@@ -120,6 +144,11 @@ class DBLogger:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute("PRAGMA synchronous=NORMAL")
         await self._conn.executescript(SCHEMA)
+        for table, column, kind in MIGRATIONS:
+            async with self._conn.execute(f"PRAGMA table_info({table})") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
+            if column not in cols:
+                await self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -158,29 +187,33 @@ class DBLogger:
                           "VALUES (?,?,?,?,?,?)", (time.time(), bar_time, sym_a, px_a, sym_b, px_b))
 
     async def log_signal(self, bar_time: float, stats: dict[str, float | None], position: str,
-                         action: str, note: str = "") -> None:
+                         action: str, note: str = "", pair: str | None = None) -> None:
         await self._write(
             "INSERT INTO signals (ts, bar_time, alpha, beta, spread, spread_mean, spread_std, zscore, "
-            "coint_pvalue, half_life, position, action, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "coint_pvalue, half_life, position, action, note, pair, vol_ratio) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (time.time(), bar_time, stats.get("alpha"), stats.get("beta"), stats.get("spread"),
              stats.get("spread_mean"), stats.get("spread_std"), stats.get("zscore"),
-             stats.get("coint_pvalue"), stats.get("half_life"), position, action, note))
+             stats.get("coint_pvalue"), stats.get("half_life"), position, action, note, pair,
+             stats.get("vol_ratio")))
 
     async def log_order(self, pair_trade_id: int | None, symbol: str, side: str, qty: float,
                         fill_price: float | None, client_order_id: str | None,
-                        broker_order_id: str | None, status: str, purpose: str) -> None:
+                        broker_order_id: str | None, status: str, purpose: str,
+                        expected_price: float | None = None) -> None:
         await self._write(
             "INSERT INTO orders (ts, pair_trade_id, symbol, side, qty, fill_price, client_order_id, "
-            "broker_order_id, status, purpose) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "broker_order_id, status, purpose, expected_price, slippage_bps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (time.time(), pair_trade_id, symbol, side, qty, fill_price, client_order_id,
-             broker_order_id, status, purpose))
+             broker_order_id, status, purpose, expected_price,
+             slippage_bps(side, fill_price, expected_price)))
 
     async def open_pair_trade(self, direction: str, entry_z: float, beta: float, qty_a: float,
-                              qty_b: float, px_a: float, px_b: float) -> int | None:
+                              qty_b: float, px_a: float, px_b: float, pair: str | None = None) -> int | None:
         return await self._write(
             "INSERT INTO pair_trades (direction, opened_at, entry_z, beta, qty_a, qty_b, entry_price_a, "
-            "entry_price_b) VALUES (?,?,?,?,?,?,?,?)",
-            (direction, time.time(), entry_z, beta, qty_a, qty_b, px_a, px_b))
+            "entry_price_b, pair) VALUES (?,?,?,?,?,?,?,?,?)",
+            (direction, time.time(), entry_z, beta, qty_a, qty_b, px_a, px_b, pair))
 
     async def close_pair_trade(self, trade_id: int, exit_z: float | None, px_a: float, px_b: float,
                                pnl: float, reason: str) -> None:
@@ -210,16 +243,44 @@ class DBLogger:
                 row = await cur.fetchone()
         return None if row is None else row[0]
 
-    async def open_trade(self) -> dict[str, Any] | None:
-        """The pair trade that is still open, if any (used to resume after a restart)."""
+    async def open_trade(self, pair: str | None = None) -> dict[str, Any] | None:
+        """The pair trade that is still open, if any (used to resume after a restart).
+
+        Rows from before portfolio mode have no pair; they belong to whichever pair asks first.
+        """
         assert self._conn is not None
+        sql, params = "SELECT * FROM pair_trades WHERE closed_at IS NULL", ()
+        if pair is not None:
+            sql, params = sql + " AND (pair = ? OR pair IS NULL)", (pair,)
         async with self._lock:
             self._conn.row_factory = aiosqlite.Row
-            async with self._conn.execute(
-                    "SELECT * FROM pair_trades WHERE closed_at IS NULL ORDER BY id DESC LIMIT 1") as cur:
+            async with self._conn.execute(sql + " ORDER BY id DESC LIMIT 1", params) as cur:
                 row = await cur.fetchone()
             self._conn.row_factory = None
         return None if row is None else dict(row)
+
+    async def period_start_equity(self, since_ts: float) -> float | None:
+        """Previous-close equity at the first snapshot since ``since_ts`` (start of a week or month)."""
+        assert self._conn is not None
+        async with self._lock:
+            async with self._conn.execute(
+                    "SELECT last_equity FROM equity WHERE ts >= ? ORDER BY id LIMIT 1", (since_ts,)) as cur:
+                row = await cur.fetchone()
+        return None if row is None else float(row[0])
+
+    async def today_summary(self, since_ts: float) -> dict[str, Any]:
+        """Closed trades and P&L since ``since_ts``, for the daily report."""
+        assert self._conn is not None
+        async with self._lock:
+            async with self._conn.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(pnl),0), COALESCE(SUM(pnl>0),0) FROM pair_trades "
+                    "WHERE closed_at >= ?", (since_ts,)) as cur:
+                n, pnl, wins = await cur.fetchone()
+            async with self._conn.execute(
+                    "SELECT AVG(slippage_bps) FROM orders WHERE ts >= ? AND slippage_bps IS NOT NULL",
+                    (since_ts,)) as cur:
+                (slip,) = await cur.fetchone()
+        return {"trades": n, "pnl": float(pnl), "wins": int(wins), "avg_slippage_bps": slip}
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +300,7 @@ def request_emergency_stop(path: str, reason: str) -> None:
     try:
         conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         conn.executescript(SCHEMA)  # harmless if it already exists
+        migrate(conn)
         with conn:  # one short transaction
             conn.execute(
                 "INSERT INTO control (key, value, updated_at) VALUES ('emergency_stop', ?, ?) "

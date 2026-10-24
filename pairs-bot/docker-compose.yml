@@ -1,0 +1,40 @@
+# docker compose up -d --build     (see DEPLOY.md)
+services:
+  bot:
+    build: .
+    env_file: .env
+    environment: &paths                # these win over .env, so the data always lands on the volume
+      BOT_MODE: alpaca
+      PAIRS_DB_PATH: /data/pairs_bot.db
+      BLACKOUT_FILE: /data/blackout.csv
+    volumes:
+      - botdata:/data
+    restart: unless-stopped
+    stop_grace_period: 60s          # time to finish a cycle cleanly on shutdown
+    logging:
+      options: { max-size: "10m", max-file: "5" }
+
+  dashboard:
+    build: .
+    env_file: .env
+    environment: *paths
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501",
+              "--server.headless=true"]
+    volumes:
+      - botdata:/data              # read-write: the emergency stop button writes a flag
+    ports:
+      - "127.0.0.1:8501:8501"        # only reachable through an SSH tunnel, never the open internet
+    restart: unless-stopped
+    depends_on: [bot]
+
+  reconcile:
+    build: .
+    env_file: .env
+    environment: *paths
+    command: ["python", "reconcile.py"]
+    volumes:
+      - botdata:/data
+    profiles: ["jobs"]              # run on a schedule: docker compose run --rm reconcile
+
+volumes:
+  botdata:

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the pairs bot reconciliation every weekday evening
+
+[Timer]
+# 22:30 UTC = after the US close all year round
+OnCalendar=Mon..Fri 22:30 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -135,6 +135,7 @@ class SpreadStats:
     zscore: float
     coint_pvalue: float
     half_life: float
+    vol_ratio: float = 1.0   # recent spread volatility / normal; >> 1 means something changed
 
     def as_dict(self) -> dict[str, float]:
         return {k: getattr(self, k) for k in self.__dataclass_fields__}
@@ -154,6 +155,53 @@ def half_life(spread: np.ndarray) -> float:
     (_, lam), *_ = np.linalg.lstsq(X, delta, rcond=None)
     # lam < 0 means the spread is pulled back; lam >= 0 means it drifts away (no reversion).
     return float(-math.log(2) / lam) if lam < 0 else math.inf
+
+
+def kalman_hedge(log_a: np.ndarray, log_b: np.ndarray, delta: float, obs_var: float,
+                 warmup: int) -> tuple[float, float, float, float]:
+    """Kalman-filter regression of log_a on log_b with a slowly drifting alpha and beta.
+
+    Unlike the rolling OLS fit, every new bar nudges the estimate a little
+    instead of re-fitting the whole window, so beta moves smoothly and a single
+    odd bar cannot swing it. State is (beta, alpha); the observation is
+    ``log_a_t = beta_t * log_b_t + alpha_t + noise``.
+
+    Returns (alpha, beta, e, sqrt_q): the latest estimates, the latest
+    one-step prediction error ``e`` (this is the spread) and its predicted
+    standard deviation, so ``z = e / sqrt_q``. Only bars up to and including
+    the last one are used, and the last bar is predicted *before* the filter
+    sees it, so z has no look-ahead.
+
+    Starts from an OLS fit on the first ``warmup`` bars. ``obs_var <= 0``
+    estimates the measurement noise from that fit's residuals. ``delta`` is
+    the state noise as a fraction of the measurement noise: 1e-3 lets beta
+    drift slowly, 1e-1 lets it chase the data. Scalar code on
+    purpose: a 2x2 filter is ~10x faster without numpy overhead.
+    """
+    # Centre log_b so the intercept and the slope are not near-duplicates
+    # (log prices sit around 4-6, which makes a raw (beta, alpha) state badly
+    # conditioned and its noise swamp the spread).
+    c = float(log_b[:warmup].mean())
+    xs = log_b - c
+    a0, b0 = hedge_ratio(log_a[:warmup], xs[:warmup])
+    if obs_var <= 0:
+        resid = log_a[:warmup] - b0 * xs[:warmup] - a0
+        obs_var = max(float(resid.var()), 1e-12)
+    w = delta * obs_var                      # state noise, as a fraction of the measurement noise
+    beta, alpha = b0, a0
+    p11 = p12 = p22 = 0.0                    # state covariance [[p11, p12], [p12, p22]]
+    e = sq = 0.0
+    for x, y in zip(xs[warmup:].tolist(), log_a[warmup:].tolist()):
+        r11, r12, r22 = p11 + w, p12, p22 + w               # predict: R = P + W
+        e = y - (beta * x + alpha)                           # prediction error with prior state
+        rx1, rx2 = r11 * x + r12, r12 * x + r22              # R @ [x, 1]
+        q = x * rx1 + rx2 + obs_var
+        sq = math.sqrt(q)
+        k1, k2 = rx1 / q, rx2 / q                            # Kalman gain
+        beta, alpha = beta + k1 * e, alpha + k2 * e
+        p11, p12, p22 = r11 - k1 * rx1, r12 - k1 * rx2, r22 - k2 * rx2
+    alpha -= beta * c                                        # back to the uncentred intercept
+    return alpha, beta, e, sq
 
 
 def coint_pvalue(log_a: np.ndarray, log_b: np.ndarray) -> float:
@@ -187,23 +235,44 @@ def compute_spread_stats(closes: pd.DataFrame, cfg: Settings, with_coint: bool =
     recent = spread[-cfg.z_lookback:]
     mean, std = float(recent.mean()), float(recent.std(ddof=1))
     z = (float(spread[-1]) - mean) / std if std > 0 else 0.0
+    last_spread = float(spread[-1])
+    if cfg.hedge_method == "kalman":
+        alpha, beta, last_spread, std = kalman_hedge(log_a, log_b, cfg.kalman_delta,
+                                                     cfg.kalman_obs_var, cfg.z_lookback)
+        mean = 0.0
+        z = last_spread / std if std > 0 else 0.0
+
+    # Volatility regime: are the last 20 spread moves much bigger than usual?
+    moves = np.diff(spread)
+    vol_ratio = float(moves[-20:].std() / moves.std()) if moves.std() > 0 else 1.0
 
     ts = closes.index[-1]
     bar_time = ts.timestamp() if hasattr(ts, "timestamp") else float(ts)
-    return SpreadStats(bar_time, float(a[-1]), float(b[-1]), alpha, beta, float(spread[-1]),
+    return SpreadStats(bar_time, float(a[-1]), float(b[-1]), alpha, beta, last_spread,
                        mean, std, z, coint_pvalue(log_a, log_b) if with_coint else math.nan,
-                       half_life(spread))
+                       half_life(spread), vol_ratio)
 
 
 # ---------------------------------------------------------------------------
 # Signal
 # ---------------------------------------------------------------------------
-def decide(position: Position, stats: SpreadStats, bars_held: int, cfg: Settings) -> tuple[Action, str]:
-    """Pure decision function: same inputs always give the same action."""
+def decide(position: Position, stats: SpreadStats, bars_held: int, cfg: Settings,
+           blackout: str | None = None) -> tuple[Action, str]:
+    """Pure decision function: same inputs always give the same action.
+
+    ``blackout`` is a reason (earnings, breaking news) to stay out of the pair:
+    no new entries, and an open trade is closed.
+    """
     z = stats.zscore
+    if blackout and position is not Position.FLAT:
+        return Action.CLOSE, f"blackout: {blackout}"
     if position is Position.FLAT:
         if abs(z) < cfg.entry_z:
             return Action.HOLD, "inside entry band"
+        if blackout:
+            return Action.BLOCKED, f"blackout: {blackout}"
+        if stats.vol_ratio > cfg.max_vol_ratio:
+            return Action.BLOCKED, f"volatility spike: recent moves {stats.vol_ratio:.1f}x normal"
         if abs(z) >= cfg.stop_z:
             return Action.BLOCKED, f"|z|={abs(z):.2f} beyond stop band; not entering a possible break"
         if stats.coint_pvalue >= cfg.min_coint_pvalue:
