@@ -29,6 +29,17 @@ Fidelity to the live bot
 * Daily loss limit: live, the bot halts for good and waits for a human. Here
   it flattens and stops trading for the rest of that day, and the report
   counts how many times a live bot would have halted.
+* Earnings blackout: pass ``--blackout blackout.csv`` and the same dates that
+  stop the live bot stop the backtest. The live news pause can't be replayed.
+* Hedge ratio: ``--hedge kalman`` uses the adaptive Kalman filter, as live
+  with ``HEDGE_METHOD=kalman``.
+
+Monte Carlo
+-----------
+One backtest is one ordering of trades. The summary also reshuffles the
+trades thousands of times (with replacement) to show the range of outcomes
+you could have seen with the same edge: the 5th-95th percentile of profit,
+the worst drawdowns and the chance of ending at a loss. See montecarlo.py.
 
 Costs modelled (per order)
 --------------------------
@@ -54,7 +65,9 @@ import numpy as np
 import pandas as pd
 
 from config import Settings, load_settings
+from blackout import Blackout
 from execution import pair_pnl, plan_pair
+from montecarlo import monte_carlo
 from strategy import Action, Position, coint_pvalue, compute_spread_stats, decide
 
 NY = "America/New_York"
@@ -195,6 +208,7 @@ class BacktestResult:
             "exit_reasons": dict(Counter(t.exit_reason.split(":")[0] for t in closed)),
             "blocked_entries": dict(self.blocked),
             "daily_loss_limit_hits": len(self.loss_limit_days),
+            "monte_carlo": monte_carlo([t.net_pnl for t in closed], self.starting_equity),
             "verdict": verdict,
         }
 
@@ -202,6 +216,16 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
+def block_category(note: str) -> str:
+    """Group a BLOCKED note into a short reason for the report."""
+    for key, label in (("stop band", "beyond stop band"), ("cointegration", "cointegration test failed"),
+                       ("hedge ratio", "hedge ratio <= 0"), ("volatility", "volatility spike"),
+                       ("blackout", "earnings/news blackout")):
+        if key in note:
+            return label
+    return note.split(":")[0]
+
+
 def regular_session(index: pd.DatetimeIndex) -> np.ndarray:
     """True for bars inside 9:30-16:00 New York time on weekdays."""
     local = index.tz_convert(NY)
@@ -210,7 +234,8 @@ def regular_session(index: pd.DatetimeIndex) -> np.ndarray:
 
 
 def run_backtest(closes: pd.DataFrame, cfg: Settings, costs: Costs = Costs(), *, fill: str = "next",
-                 starting_equity: float = 100_000.0, all_hours: bool = False) -> BacktestResult:
+                 starting_equity: float = 100_000.0, all_hours: bool = False,
+                 blackout: Blackout | None = None) -> BacktestResult:
     """Walk forward bar by bar. ``closes``: UTC DatetimeIndex, one column per symbol, oldest first."""
     if fill not in ("next", "close"):
         raise ValueError("fill must be 'next' or 'close'")
@@ -313,10 +338,10 @@ def run_backtest(closes: pd.DataFrame, cfg: Settings, costs: Costs = Costs(), *,
         # 4. Decide, exactly as live.
         if position is not Position.FLAT:
             bars_held += 1
-        action, note = decide(position, stats, bars_held, cfg)
+        event = blackout.reason(day[i], (a_sym, b_sym)) if blackout else None
+        action, note = decide(position, stats, bars_held, cfg, event)
         if action is Action.BLOCKED:
-            blocked["beyond stop band" if "stop band" in note else
-                    "cointegration test failed" if "cointegration" in note else "hedge ratio <= 0"] += 1
+            blocked[block_category(note)] += 1
             continue
         if action in (Action.OPEN_LONG, Action.OPEN_SHORT):
             if day_stopped:
@@ -386,6 +411,26 @@ def fetch_alpaca(cfg: Settings, start: str, end: str, cache_dir: str | Path = "d
     cache.parent.mkdir(parents=True, exist_ok=True)
     closes.to_csv(cache)
     return closes
+
+
+def measured_slippage_bps(db_path: str | Path) -> float | None:
+    """Median cost per order the live bot actually paid, in bps (half-spread + slippage).
+
+    Slippage is measured against the price the bot expected when it decided
+    (the quote mid for limit entries, the last close otherwise), so it
+    already includes half the spread. Negative values (price improvement)
+    count too: the median is the honest middle.
+    """
+    from db_logger import connect_readonly
+
+    conn = connect_readonly(str(db_path))
+    try:
+        rows = [r[0] for r in conn.execute("SELECT slippage_bps FROM orders WHERE slippage_bps IS NOT NULL")]
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    return float(np.median(rows)) if rows else None
 
 
 def sim_closes(cfg: Settings, bars: int, seed: int = 11, **market_kw) -> pd.DataFrame:
@@ -469,6 +514,10 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
                    help="next: fill at the next bar (realistic); close: fill at the signal bar (optimistic)")
     p.add_argument("--equity", type=float, default=100_000.0)
     p.add_argument("--all-hours", action="store_true", help="trade every bar (implied for --source sim)")
+    p.add_argument("--hedge", choices=("ols", "kalman"), help="hedge ratio method (default: HEDGE_METHOD or ols)")
+    p.add_argument("--blackout", help="CSV of earnings/event dates (date,symbol,note) to stay out of the pair")
+    p.add_argument("--costs-from-db", metavar="DB",
+                   help="use the median slippage the live bot measured in this database as --spread-bps")
     p.add_argument("--out", default="backtest_out")
     args = p.parse_args(argv)
 
@@ -480,6 +529,8 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
         value = getattr(args, name)
         if value is not None:
             overrides["timeframe_minutes" if name == "timeframe" else name] = value
+    if args.hedge:
+        overrides["hedge_method"] = args.hedge
     if args.leg_notional:
         overrides.setdefault("max_gross_exposure", max(10_000.0, 5 * args.leg_notional))
     cfg = load_settings(mode="alpaca" if args.source == "alpaca" else "sim", **overrides)
@@ -495,9 +546,18 @@ def main(argv: list[str] | None = None) -> dict[str, object]:
     else:
         closes = sim_closes(cfg, args.bars, args.seed)
 
-    costs = Costs(spread_bps=args.spread_bps, borrow_rate_annual=args.borrow_rate)
+    spread_bps = args.spread_bps
+    if args.costs_from_db:
+        measured = measured_slippage_bps(args.costs_from_db)
+        if measured is None:
+            print(f"{args.costs_from_db}: no filled orders with a measured slippage yet; using {spread_bps} bps")
+        else:
+            print(f"Using measured median cost {measured:.2f} bps per order from {args.costs_from_db}")
+            spread_bps = measured
+    costs = Costs(spread_bps=spread_bps, borrow_rate_annual=args.borrow_rate)
     result = run_backtest(closes, cfg, costs, fill=args.fill, starting_equity=args.equity,
-                          all_hours=args.all_hours or args.source == "sim")
+                          all_hours=args.all_hours or args.source == "sim",
+                          blackout=Blackout(args.blackout) if args.blackout else None)
     report = write_report(result, cfg, args.out)
     summary = result.summary()
     print_summary(summary)

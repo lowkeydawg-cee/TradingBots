@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from execution import Account, Fill, Holding, OrderFailed
+from execution import Account, EntrySkipped, Fill, Holding, OrderFailed, Quote
 
 
 @dataclass
@@ -77,25 +77,62 @@ class SimMarket:
         return a if symbol == self.symbol_a else b
 
 
-class SimMarketData:
-    """MarketData implementation: every call advances the simulated market one bar."""
+class SimUniverse:
+    """Several independent simulated pairs that move in lockstep (portfolio mode)."""
 
-    def __init__(self, market: SimMarket, advance: bool = True) -> None:
+    def __init__(self, markets: list[SimMarket]) -> None:
+        self.markets = markets
+        self._by_symbol = {s: m for m in markets for s in (m.symbol_a, m.symbol_b)}
+
+    @classmethod
+    def for_pairs(cls, pairs, **kw) -> "SimUniverse":
+        return cls([SimMarket(symbol_a=a, symbol_b=b, seed=11 + 7 * k, **kw) for k, (a, b) in enumerate(pairs)])
+
+    def warm_up(self, bars: int) -> None:
+        for m in self.markets:
+            m.warm_up(bars)
+
+    def market(self, symbol: str) -> SimMarket:
+        return self._by_symbol[symbol]
+
+    def price(self, symbol: str) -> float:
+        return self._by_symbol[symbol].price(symbol)
+
+    @property
+    def last(self) -> tuple[float, float, float]:
+        return max((m.last for m in self.markets), key=lambda r: r[0])
+
+
+class SimMarketData:
+    """MarketData implementation: every call advances that pair's simulated market one bar."""
+
+    def __init__(self, market: SimMarket | SimUniverse, advance: bool = True) -> None:
         self.market = market
         self.advance = advance
 
     async def get_closes(self, symbols: tuple[str, str], bars: int) -> pd.DataFrame:
+        m = self.market.market(symbols[0]) if isinstance(self.market, SimUniverse) else self.market
         if self.advance:
-            self.market.step()
-        return self.market.closes(bars)
+            m.step()
+        return m.closes(bars)
 
 
 @dataclass
 class SimBroker:
-    """Fills market orders instantly at the simulated last price."""
+    """Fills market orders instantly at the simulated bid/ask (the last price +/- half a spread).
 
-    market: SimMarket
+    Limit orders that cross the quote fill at once. Passive ones (e.g. resting at
+    the mid) fill with probability ``passive_fill_prob`` and, if they do, for
+    ``passive_fill_ratio`` of the quantity, which lets tests exercise misses and
+    partial fills.
+    """
+
+    market: SimMarket | SimUniverse
     starting_equity: float = 100_000.0
+    half_spread_bps: float = 0.0
+    passive_fill_prob: float = 1.0
+    passive_fill_ratio: float = 1.0
+    seed: int = 5
     shortable: set[str] | None = None          # None = everything shortable
     fail_symbols: set[str] = field(default_factory=set)   # orders on these are rejected
     cash: float = field(init=False)
@@ -107,6 +144,36 @@ class SimBroker:
 
     def __post_init__(self) -> None:
         self.cash = self.starting_equity
+        self._rng = random.Random(self.seed)
+
+    async def quote(self, symbol: str) -> Quote:
+        px = self.market.price(symbol)
+        h = px * self.half_spread_bps / 1e4
+        return Quote(px - h, px + h)
+
+    def _fill(self, symbol: str, qty: float, side: str, px: float, tag: str) -> Fill:
+        signed = qty if side == "buy" else -qty
+        old = self.qty.get(symbol, 0.0)
+        new = old + signed
+        if old == 0 or (old > 0) == (signed > 0):   # opening or adding: update average price
+            self.avg[symbol] = (abs(old) * self.avg.get(symbol, px) + qty * px) / abs(new)
+        self.qty[symbol] = new
+        self.cash -= signed * px
+        fill = Fill(symbol, side, qty, px, f"{tag}-{next(self._ids)}", "filled")
+        self.orders.append(fill)
+        return fill
+
+    async def limit_order(self, symbol: str, qty: float, side: str, limit_price: float,
+                          client_order_id: str, timeout: float) -> Fill:
+        if symbol in self.fail_symbols:
+            raise OrderFailed(f"simulated rejection for {symbol}")
+        q = await self.quote(symbol)
+        if (side == "buy" and limit_price >= q.ask) or (side == "sell" and limit_price <= q.bid):
+            return self._fill(symbol, qty, side, q.ask if side == "buy" else q.bid, "sim")
+        if self._rng.random() >= self.passive_fill_prob:
+            raise EntrySkipped(f"limit {side} {symbol} @ {limit_price:.2f} not filled within {timeout:.0f}s")
+        filled = max(1, math.floor(qty * self.passive_fill_ratio))
+        return self._fill(symbol, filled, side, limit_price, "sim")
 
     def _equity(self) -> float:
         return self.cash + sum(q * self.market.price(s) for s, q in self.qty.items())
@@ -131,17 +198,8 @@ class SimBroker:
     async def market_order(self, symbol: str, qty: float, side: str, client_order_id: str) -> Fill:
         if symbol in self.fail_symbols:
             raise OrderFailed(f"simulated rejection for {symbol}")
-        px = self.market.price(symbol)
-        signed = qty if side == "buy" else -qty
-        old = self.qty.get(symbol, 0.0)
-        new = old + signed
-        if old == 0 or (old > 0) == (signed > 0):   # opening or adding: update average price
-            self.avg[symbol] = (abs(old) * self.avg.get(symbol, px) + qty * px) / abs(new)
-        self.qty[symbol] = new
-        self.cash -= signed * px
-        fill = Fill(symbol, side, qty, px, f"sim-{next(self._ids)}", "filled")
-        self.orders.append(fill)
-        return fill
+        q = await self.quote(symbol)
+        return self._fill(symbol, qty, side, q.ask if side == "buy" else q.bid, "sim")
 
     async def close_position(self, symbol: str) -> Fill | None:
         q = self.qty.get(symbol, 0.0)

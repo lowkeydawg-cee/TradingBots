@@ -61,7 +61,7 @@ def alpaca_snapshot(api_key: str, secret_key: str) -> dict:
             "buying_power": float(acct.buying_power), "positions": positions}
 
 
-def performance(trades: pd.DataFrame) -> dict[str, object]:
+def performance(trades: pd.DataFrame, slippage: float | None = None) -> dict[str, object]:
     closed = trades.dropna(subset=["closed_at"])
     closed = closed[~closed["exit_reason"].fillna("").str.startswith("reconciled")]
     wins = int((closed["pnl"] > 0).sum())
@@ -73,21 +73,36 @@ def performance(trades: pd.DataFrame) -> dict[str, object]:
         "Best / worst ($)": (f"{closed['pnl'].max():.2f} / {closed['pnl'].min():.2f}"
                              if len(closed) else "n/a"),
         "Active positions": int(trades["closed_at"].isna().sum()),
+        "Avg cost per order (bps)": f"{slippage:.2f}" if slippage is not None and pd.notna(slippage) else "n/a",
     }
+
+
+def per_pair(trades: pd.DataFrame) -> pd.DataFrame:
+    """One row per pair: trades, win rate, P&L. Old rows without a pair count as the first pair."""
+    closed = trades.dropna(subset=["closed_at"]).copy()
+    closed = closed[~closed["exit_reason"].fillna("").str.startswith("reconciled")]
+    if closed.empty:
+        return pd.DataFrame(columns=["pair", "trades", "win rate", "P&L ($)", "avg ($)"])
+    closed["pair"] = closed["pair"].fillna(PAIRS[0])
+    g = closed.groupby("pair")["pnl"]
+    return pd.DataFrame({"trades": g.size(), "win rate": g.apply(lambda x: f"{(x > 0).mean():.0%}"),
+                         "P&L ($)": g.sum().round(2), "avg ($)": g.mean().round(2)}).reset_index()
 
 
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
 cfg = settings()
+PAIRS = [f"{a}/{b}" for a, b in cfg.all_pairs]
 st.sidebar.header("Settings")
+pair = st.sidebar.selectbox("Pair (charts)", PAIRS)
 db_path = st.sidebar.text_input("Database", cfg.db_path)
 refresh = st.sidebar.slider("Refresh every (s)", 2, 60, 5)
 window = st.sidebar.slider("Chart window (bars)", 60, 2_000, 400, step=20)
-st.sidebar.caption(f"Pair **{cfg.symbol_a} / {cfg.symbol_b}** · mode **{cfg.mode}** · "
-                   f"entry ±{cfg.entry_z} · exit ±{cfg.exit_z} · stop ±{cfg.stop_z}")
+st.sidebar.caption(f"{len(PAIRS)} pair(s) · mode **{cfg.mode}** · hedge **{cfg.hedge_method}** · "
+                   f"orders **{cfg.order_type}** · entry ±{cfg.entry_z} · exit ±{cfg.exit_z} · stop ±{cfg.stop_z}")
 
-st.title(f"Pairs bot · {cfg.symbol_a} / {cfg.symbol_b}")
+st.title(f"Pairs bot · {pair}" if len(PAIRS) == 1 else f"Pairs bot · {len(PAIRS)} pairs · charts for {pair}")
 
 if not Path(db_path).exists():
     st.info(f"No database at `{db_path}` yet. Start the bot with `python main.py`.")
@@ -102,9 +117,15 @@ def live_panel() -> None:
     halted = ctl.get("halted") or ""
     eq = to_time(query(db_path, "SELECT ts, equity, last_equity, daily_pnl, gross_exposure FROM equity "
                                 "ORDER BY id DESC LIMIT ?", (window,)).iloc[::-1])
-    sig = to_time(query(db_path, "SELECT ts, bar_time, zscore, beta, coint_pvalue, half_life, position, "
-                                 "action, note FROM signals ORDER BY id DESC LIMIT ?", (window,)).iloc[::-1])
+    # Rows written before multi-pair support have no pair: they belong to the first pair.
+    pair_sql = "(pair = ? OR (pair IS NULL AND ? = ?))"
+    pair_args = (pair, pair, PAIRS[0])
+    sig = to_time(query(db_path, "SELECT ts, bar_time, zscore, beta, coint_pvalue, half_life, vol_ratio, position, "
+                                 f"action, note FROM signals WHERE {pair_sql} ORDER BY id DESC LIMIT ?",
+                        (*pair_args, window)).iloc[::-1])
     trades = query(db_path, "SELECT * FROM pair_trades ORDER BY id")
+    slippage = query(db_path, "SELECT AVG(slippage_bps) AS s FROM orders WHERE slippage_bps IS NOT NULL")["s"].iloc[0]
+    retired = {k.split(":", 1)[1]: v for k, v in ctl.items() if k.startswith("retired:") and v}
 
     # --- status strip ----------------------------------------------------
     if halted:
@@ -113,6 +134,8 @@ def live_panel() -> None:
         st.warning(f"No heartbeat for {time.time() - heartbeat:.0f}s. Is `main.py` running?")
     else:
         st.success("Running")
+    for name, why in retired.items():
+        st.warning(f"{name} is retired ({why}). It won't open new trades until you restart with `--reset-halt`.")
 
     c = st.columns(5)
     if not eq.empty:
@@ -167,9 +190,12 @@ def live_panel() -> None:
 
     # --- performance -----------------------------------------------------
     st.subheader("Performance")
-    perf = performance(trades) if not trades.empty else performance(
-        pd.DataFrame(columns=["closed_at", "pnl", "exit_reason"]))
+    perf = performance(trades, slippage) if not trades.empty else performance(
+        pd.DataFrame(columns=["closed_at", "pnl", "exit_reason"]), slippage)
     st.table(pd.DataFrame({"Metric": list(perf), "Value": [str(v) for v in perf.values()]}))
+    if len(PAIRS) > 1 and not trades.empty:
+        st.caption("By pair")
+        st.dataframe(per_pair(trades), width="stretch", hide_index=True)
 
     if cfg.mode == "alpaca":
         try:
