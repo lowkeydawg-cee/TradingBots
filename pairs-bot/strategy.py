@@ -166,8 +166,13 @@ def coint_pvalue(log_a: np.ndarray, log_b: np.ndarray) -> float:
     return float(pvalue)
 
 
-def compute_spread_stats(closes: pd.DataFrame, cfg: Settings) -> SpreadStats:
-    """Turn aligned closes into the current hedge ratio, spread and z-score."""
+def compute_spread_stats(closes: pd.DataFrame, cfg: Settings, with_coint: bool = True) -> SpreadStats:
+    """Turn aligned closes into the current hedge ratio, spread and z-score.
+
+    ``with_coint=False`` skips the slow Engle-Granger test and leaves
+    ``coint_pvalue`` as NaN. The backtester uses it and runs the test only on
+    bars where ``decide`` actually reads the p-value.
+    """
     if len(closes) < cfg.hedge_lookback:
         raise ValueError(f"need {cfg.hedge_lookback} aligned bars, have {len(closes)}")
     window = closes.tail(cfg.hedge_lookback)
@@ -186,7 +191,8 @@ def compute_spread_stats(closes: pd.DataFrame, cfg: Settings) -> SpreadStats:
     ts = closes.index[-1]
     bar_time = ts.timestamp() if hasattr(ts, "timestamp") else float(ts)
     return SpreadStats(bar_time, float(a[-1]), float(b[-1]), alpha, beta, float(spread[-1]),
-                       mean, std, z, coint_pvalue(log_a, log_b), half_life(spread))
+                       mean, std, z, coint_pvalue(log_a, log_b) if with_coint else math.nan,
+                       half_life(spread))
 
 
 # ---------------------------------------------------------------------------

@@ -5,3 +5,5 @@
 *.fallback.jsonl
 __pycache__/
 .pytest_cache/
+backtest_out/
+data/

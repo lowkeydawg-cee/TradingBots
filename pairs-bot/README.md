@@ -4,6 +4,8 @@ An asynchronous statistical-arbitrage bot for one stock pair. It runs on the
 **Alpaca paper** account through `alpaca-py`, logs every event to SQLite, and
 includes a live Streamlit dashboard with an emergency stop.
 
+New here? Start with [LEARN.md](LEARN.md), which has a plain-words walkthrough and a learning path. [GUIDE.md](GUIDE.md) has the rating and the roadmap.
+
 ![Dashboard](docs/dashboard.png)
 *Dashboard rendered against the offline simulator after 800 cycles. These are simulated numbers, not real results.*
 
@@ -18,7 +20,8 @@ pairs-bot/
 ├── main.py          # asyncio loop: risk checks -> model -> execute -> log; persisted halt
 ├── app.py           # Streamlit: equity curve, z-score chart, performance table, emergency stop
 ├── sim.py           # offline cointegrated market + simulated broker (BOT_MODE=sim)
-├── tests/           # 20 tests: math, sizing, leg risk, halts, DB concurrency, dashboard render
+├── backtest.py      # replays history through the same rules, with costs; break-even cost report
+├── tests/           # 28 tests: math, sizing, leg risk, halts, DB concurrency, dashboard, backtester
 ├── .env.example
 └── requirements.txt
 ```
@@ -38,8 +41,35 @@ python main.py --mode alpaca --cycles 1      # smoke test: one cycle, check the 
 python main.py                                # run; Ctrl-C stops cleanly
 streamlit run app.py
 
-python -m pytest -q                           # 20 tests, ~45 s
+python -m pytest -q                           # 28 tests, ~2 min
 ```
+
+## Backtesting: does it make money after costs?
+
+```bash
+python backtest.py --source alpaca --start 2026-04-01 --end 2026-10-01   # real history, needs keys
+python backtest.py --source alpaca --start 2026-04-01 --end 2026-10-01 --timeframe 15
+python backtest.py --source csv --csv data/my_bars.csv                    # your own bars
+python backtest.py --source sim --bars 20000                              # offline demo only
+```
+
+The backtester runs history through the **same** `compute_spread_stats`, `decide`
+and `plan_pair` the live bot uses. A test checks that, on the same prices, it
+reproduces the live loop's trades and P&L exactly. It has no look-ahead, and by
+default each order fills on the bar *after* the signal. It charges every order
+`--spread-bps` (half the bid/ask spread plus slippage, 2 bps by default), the
+SEC and FINRA fees on sells, and a borrow fee on the short leg.
+
+It prints a summary and writes `backtest_out/` (`report.html`, `trades.csv`,
+`equity.csv`, `summary.json`). The two lines to read first:
+
+- **`breakeven_cost_bps`**: the largest cost per order at which the strategy still
+  breaks even. If your real cost is close to or above it, there is no edge.
+- **`verdict`**: no edge / too few trades / weak edge / worth checking out of sample.
+
+Downloaded bars are cached in `data/`, so re-runs with different thresholds are
+offline and fast. Sim results are meaningless for profitability (the simulator is
+cointegrated by construction); use real history.
 
 ## How it trades
 
