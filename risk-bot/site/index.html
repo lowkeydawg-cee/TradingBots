@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk Bot</title>
+<style>
+  :root { --bg:#ffffff; --text:#1b2330; --muted:#5b6678; --accent:#b7791f; --panel:#f4f6f9; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1724; --text:#eef2f8; --muted:#9fb0c8; --accent:#f2b134; --panel:#172235; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:17px/1.6 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:48px 16px; }
+  h1 { font-size:2.2rem; margin:0 0 8px; }
+  .kicker { color:var(--accent); text-transform:uppercase; letter-spacing:3px; font-size:.8rem; }
+  .card { background:var(--panel); border-radius:12px; padding:16px 20px; margin:16px 0; }
+  code { background:var(--panel); padding:2px 6px; border-radius:6px; }
+  a { color:var(--accent); }
+  p.muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="kicker">TradingBots</div>
+  <h1>Risk Bot</h1>
+  <p class="muted">An async Python bot for automated risk governance, data logging and disciplined execution on a mock crash-game feed.</p>
+  <div class="card">
+    <strong>What it does</strong>
+    <ul>
+      <li>Runs a strict state machine with circuit breakers, loss limits and a persistent kill latch.</li>
+      <li>Logs every event to SQLite and a hash-chained journal that can be replayed deterministically.</li>
+      <li>Never predicts outcomes, never uses martingale recovery and never applies machine learning to random data.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <strong>It runs on your machine, not here</strong>
+    <p>This is a long-running program, not a website. This page is only an overview. To run it:</p>
+    <p><code>pip install -r requirements.txt &amp;&amp; python -m riskbot --scenario normal -v</code></p>
+  </div>
+  <p>Code, docs and the companion pairs-trading bot: <a href="https://github.com/lowkeydawg-cee/TradingBots">github.com/lowkeydawg-cee/TradingBots</a></p>
+</main>
+</body>
+</html>
