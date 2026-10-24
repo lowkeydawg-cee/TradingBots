@@ -4,7 +4,7 @@ An asynchronous statistical-arbitrage bot for one stock pair. It runs on the
 **Alpaca paper** account through `alpaca-py`, logs every event to SQLite, and
 includes a live Streamlit dashboard with an emergency stop.
 
-New here? Start with [LEARN.md](LEARN.md), which has a plain-words walkthrough and a learning path. [GUIDE.md](GUIDE.md) has the rating and the roadmap.
+New here? Start with [LEARN.md](LEARN.md), then test it with [TESTING.md](TESTING.md), which has a plain-words walkthrough and a learning path. [GUIDE.md](GUIDE.md) has the rating and the roadmap.
 
 ![Dashboard](docs/dashboard.png)
 *Dashboard rendered against the offline simulator after 800 cycles. These are simulated numbers, not real results.*
