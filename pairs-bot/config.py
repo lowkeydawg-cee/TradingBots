@@ -13,6 +13,7 @@ Run modes
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,10 +52,13 @@ class Settings:
     paper: bool = True
     data_feed: str = "iex"                  # "iex" is free; "sip" needs a paid data plan
 
-    # --- the pair --------------------------------------------------------------
+    # --- the pair(s) -----------------------------------------------------------
     # Spread = log(A) - beta * log(B) - alpha. Classic, liquid, economically linked pair.
     symbol_a: str = "KO"
     symbol_b: str = "PEP"
+    # Portfolio mode: several pairs traded side by side, e.g. (("KO","PEP"),("XOM","CVX")).
+    # Empty = just (symbol_a, symbol_b). Pairs may not share a symbol.
+    pairs: tuple[tuple[str, str], ...] = ()
 
     # --- data / timing -----------------------------------------------------------
     timeframe_minutes: int = 1              # bar size
@@ -70,12 +74,37 @@ class Settings:
     max_holding_bars: int = 390             # time stop: close if not reverted within this many bars
     min_coint_pvalue: float = 0.05          # only open if Engle-Granger p-value < this
 
+    # --- model -------------------------------------------------------------------
+    hedge_method: str = "ols"               # "ols" (rolling regression) or "kalman" (adaptive beta)
+    kalman_delta: float = 1e-3              # how fast the Kalman beta may drift (bigger = faster)
+    kalman_obs_var: float = 0.0             # Kalman measurement noise; 0 = estimate from the window
+    max_vol_ratio: float = 3.0              # block entries if recent spread volatility > this x normal
+    blackout_file: str = "blackout.csv"     # earnings/news dates: no entries, close open trades
+    news_pause_minutes: int = 30            # alpaca mode: no entries if a symbol had news this recently (0 = off)
+
     # --- sizing and risk limits --------------------------------------------------
     leg_notional: float = 2_000.0           # $ exposure on the A leg; B leg is beta-weighted
     max_gross_exposure: float = 10_000.0    # |A| + |B| market value cap
     max_daily_loss_usd: float = 300.0       # vs. previous close equity
     max_daily_loss_pct: float = 0.02        # 2% of previous close equity; the tighter of the two wins
     max_consecutive_errors: int = 5         # API/data errors in a row before halting
+    risk_per_trade_usd: float = 0.0         # >0: size each pair so a stop-out loses about this much
+    max_weekly_loss_pct: float = 0.04       # halt if down this much since the week's first close
+    max_monthly_loss_pct: float = 0.08      # halt if down this much since the month's first close
+    retire_pvalue: float = 0.10             # a pair whose daily cointegration p-value stays above this...
+    retire_days: int = 5                    # ...for this many trading days in a row stops opening trades
+
+    # --- execution -----------------------------------------------------------------
+    order_type: str = "limit"               # "limit": passive first leg at the mid; "market": old behaviour
+    limit_timeout_seconds: float = 20.0     # how long the passive leg may rest before it is cancelled
+    max_slippage_bps: float = 10.0          # cap for the marketable second leg, vs. the quote
+    max_quote_spread_bps: float = 15.0      # skip entries when the bid/ask spread is wider than this
+
+    # --- operations ----------------------------------------------------------------
+    data_source: str = "poll"               # "poll" (REST every bar) or "stream" (Alpaca websocket)
+    telegram_token: str = field(default="", repr=False)
+    telegram_chat_id: str = ""
+    notify_trades: bool = True              # also send a message on each open/close (halts always alert)
 
     # --- storage -----------------------------------------------------------------
     db_path: str = "pairs_bot.db"
@@ -99,6 +128,36 @@ class Settings:
             raise ConfigError("bad daily loss limits")
         if self.data_feed not in ("iex", "sip"):
             raise ConfigError("ALPACA_DATA_FEED must be 'iex' or 'sip'")
+        if self.hedge_method not in ("ols", "kalman"):
+            raise ConfigError("HEDGE_METHOD must be 'ols' or 'kalman'")
+        if self.order_type not in ("limit", "market"):
+            raise ConfigError("ORDER_TYPE must be 'limit' or 'market'")
+        if self.data_source not in ("poll", "stream"):
+            raise ConfigError("DATA_SOURCE must be 'poll' or 'stream'")
+        symbols = [s for pair in self.all_pairs for s in pair]
+        if any(a == b for a, b in self.all_pairs):
+            raise ConfigError("the two symbols of a pair must differ")
+        if len(symbols) != len(set(symbols)):
+            raise ConfigError("pairs may not share a symbol (closing one would close the other's leg)")
+
+    @property
+    def all_pairs(self) -> tuple[tuple[str, str], ...]:
+        return self.pairs or ((self.symbol_a, self.symbol_b),)
+
+    def for_pair(self, a: str, b: str) -> "Settings":
+        """The same settings, focused on one pair (each pair engine gets its own view)."""
+        return dataclasses.replace(self, symbol_a=a, symbol_b=b, pairs=self.all_pairs)
+
+
+def _pairs(raw: str) -> tuple[tuple[str, str], ...]:
+    """'KO:PEP, XOM:CVX' -> (("KO","PEP"), ("XOM","CVX"))."""
+    out = []
+    for item in filter(None, (x.strip() for x in raw.split(","))):
+        a, sep, b = item.partition(":")
+        if not sep:
+            raise ConfigError(f"bad PAIRS entry {item!r}; use A:B")
+        out.append((a.strip().upper(), b.strip().upper()))
+    return tuple(out)
 
 
 def load_settings(**overrides: object) -> Settings:
@@ -126,6 +185,26 @@ def load_settings(**overrides: object) -> Settings:
         max_daily_loss_pct=_f("MAX_DAILY_LOSS_PCT", 0.02),
         max_consecutive_errors=_i("MAX_CONSECUTIVE_ERRORS", 5),
         db_path=_env("PAIRS_DB_PATH", "pairs_bot.db"),
+        pairs=_pairs(_env("PAIRS", "")),
+        hedge_method=_env("HEDGE_METHOD", "ols").lower(),
+        kalman_delta=_f("KALMAN_DELTA", 1e-3),
+        kalman_obs_var=_f("KALMAN_OBS_VAR", 0.0),
+        max_vol_ratio=_f("MAX_VOL_RATIO", 3.0),
+        blackout_file=_env("BLACKOUT_FILE", "blackout.csv"),
+        news_pause_minutes=_i("NEWS_PAUSE_MINUTES", 30),
+        risk_per_trade_usd=_f("RISK_PER_TRADE_USD", 0.0),
+        max_weekly_loss_pct=_f("MAX_WEEKLY_LOSS_PCT", 0.04),
+        max_monthly_loss_pct=_f("MAX_MONTHLY_LOSS_PCT", 0.08),
+        retire_pvalue=_f("RETIRE_PVALUE", 0.10),
+        retire_days=_i("RETIRE_DAYS", 5),
+        order_type=_env("ORDER_TYPE", "limit").lower(),
+        limit_timeout_seconds=_f("LIMIT_TIMEOUT_SECONDS", 20.0),
+        max_slippage_bps=_f("MAX_SLIPPAGE_BPS", 10.0),
+        max_quote_spread_bps=_f("MAX_QUOTE_SPREAD_BPS", 15.0),
+        data_source=_env("DATA_SOURCE", "poll").lower(),
+        telegram_token=_env("TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=_env("TELEGRAM_CHAT_ID", ""),
+        notify_trades=_env("NOTIFY_TRADES", "1") not in ("0", "false", "no"),
     )
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]

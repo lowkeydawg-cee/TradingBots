@@ -1,0 +1,9 @@
+[Unit]
+Description=Pairs bot nightly reconciliation
+
+[Service]
+Type=oneshot
+User=bot
+WorkingDirectory=/opt/TradingBots/pairs-bot
+EnvironmentFile=/opt/TradingBots/pairs-bot/.env
+ExecStart=/opt/TradingBots/pairs-bot/.venv/bin/python reconcile.py
