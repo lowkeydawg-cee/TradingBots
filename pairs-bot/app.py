@@ -9,6 +9,8 @@ The only thing it ever writes is the emergency-stop flag.
 
 from __future__ import annotations
 
+import hmac
+import os
 import time
 from pathlib import Path
 
@@ -94,6 +96,19 @@ def per_pair(trades: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 cfg = settings()
 PAIRS = [f"{a}/{b}" for a, b in cfg.all_pairs]
+
+# Optional password (set DASHBOARD_PASSWORD in .env). Recommended whenever the
+# dashboard is reachable from other devices, e.g. your phone over Tailscale.
+_password = os.environ.get("DASHBOARD_PASSWORD", "")
+if _password and not st.session_state.get("authed"):
+    st.title("Pairs bot")
+    entered = st.text_input("Password", type="password")
+    if entered and hmac.compare_digest(entered.encode(), _password.encode()):
+        st.session_state["authed"] = True
+        st.rerun()
+    elif entered:
+        st.error("Wrong password")
+    st.stop()
 st.sidebar.header("Settings")
 pair = st.sidebar.selectbox("Pair (charts)", PAIRS)
 db_path = st.sidebar.text_input("Database", cfg.db_path)
@@ -134,6 +149,8 @@ def live_panel() -> None:
         st.warning(f"No heartbeat for {time.time() - heartbeat:.0f}s. Is `main.py` running?")
     else:
         st.success("Running")
+    if ctl.get("paused") and not halted:
+        st.info(f"PAUSED by {ctl['paused']}: no new trades. Send /resume in Telegram to allow them again.")
     for name, why in retired.items():
         st.warning(f"{name} is retired ({why}). It won't open new trades until you restart with `--reset-halt`.")
 

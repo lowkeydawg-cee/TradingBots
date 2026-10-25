@@ -26,9 +26,10 @@ pairs-bot/
 ├── blackout.py      # earnings-date file and Alpaca news pause
 ├── streaming.py     # websocket bars instead of polling (DATA_SOURCE=stream)
 ├── notify.py        # Telegram alerts: halts, trades, daily report
+├── telegram_commands.py  # control from your phone: /status /trades /pnl /pause /resume /stop
 ├── reconcile.py     # nightly check that our records match the broker
 ├── Dockerfile, docker-compose.yml, deploy/   # run it on a server (see DEPLOY.md)
-├── tests/           # 53 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
+├── tests/           # 58 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
 ├── .env.example     # every setting, explained
 └── requirements.txt
 ```
@@ -48,7 +49,7 @@ python main.py --mode alpaca --cycles 1      # smoke test: one cycle, check the 
 python main.py                                # run; Ctrl-C stops cleanly
 streamlit run app.py
 
-python -m pytest -q                           # 53 tests, ~4 min
+python -m pytest -q                           # 58 tests, ~4 min
 
 # 3. Find pairs, then run several at once
 python scanner.py --source alpaca --start 2026-01-01 --end 2026-10-01 --timeframe 15
@@ -63,7 +64,7 @@ python scanner.py --source alpaca --start 2026-01-01 --end 2026-10-01 --timefram
 | **Real execution** | Entries rest a limit order at the mid for the first leg, then take the second leg with a capped marketable limit. Wide quotes are skipped. Every fill's slippage is stored, and `backtest.py --costs-from-db pairs_bot.db` reuses it as the cost | `ORDER_TYPE`, `LIMIT_TIMEOUT_SECONDS`, `MAX_SLIPPAGE_BPS`, `MAX_QUOTE_SPREAD_BPS` |
 | **Smarter model** | Kalman-filter hedge ratio that adapts bar by bar; 5–15 minute bars; no entries while spread moves are 3x normal; stay out on earnings days and for 30 minutes after a headline | `HEDGE_METHOD=kalman`, `TIMEFRAME_MINUTES`, `MAX_VOL_RATIO`, `BLACKOUT_FILE`, `NEWS_PAUSE_MINUTES` |
 | **Multi-pair portfolio** | One engine per pair under shared exposure and loss caps. Optional sizing so every stop-out loses about the same dollars. Weekly and monthly loss halts. A pair whose cointegration stays broken for N days is retired | `PAIRS`, `RISK_PER_TRADE_USD`, `MAX_WEEKLY_LOSS_PCT`, `MAX_MONTHLY_LOSS_PCT`, `RETIRE_PVALUE`, `RETIRE_DAYS` |
-| **Run as a service** | Docker or systemd on a small server, streaming prices, Telegram alerts on trades and halts, a daily report after the close and a nightly reconciliation job | [DEPLOY.md](DEPLOY.md), `DATA_SOURCE=stream`, `TELEGRAM_*` |
+| **Run as a service** | One-command server setup (`deploy/setup.sh`), Docker or systemd, streaming prices, Telegram alerts **and commands** (`/status`, `/pause`, `/stop confirm`...), a password-protected dashboard reachable privately from your laptop and phone through Tailscale, a daily report and a nightly reconciliation | [DEPLOY.md](DEPLOY.md), `DATA_SOURCE=stream`, `TELEGRAM_*`, `DASHBOARD_PASSWORD` |
 
 Everything is off or conservative by default except limit orders, which are
 cheaper. With no `PAIRS` set the bot trades `PAIR_SYMBOL_A/B` exactly as before.

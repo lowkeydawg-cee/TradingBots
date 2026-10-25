@@ -42,6 +42,7 @@ from config import Settings, load_settings
 from db_logger import DBLogger
 from execution import AlpacaBroker, Broker, EntrySkipped, OrderFailed, PairExecutor, pair_pnl, plan_pair
 from notify import Notifier
+from telegram_commands import TelegramCommands
 from reconcile import mismatches
 from strategy import Action, MarketData, Position, SpreadStats, compute_spread_stats, decide
 
@@ -107,6 +108,8 @@ class PairEngine:
         if action in (Action.OPEN_LONG, Action.OPEN_SHORT):
             if self.retired:
                 action, note = Action.BLOCKED, f"pair retired: {self.retired}"
+            elif bot.paused:
+                action, note = Action.BLOCKED, f"paused by {bot.paused}"
             elif bot.news is not None and (news := await bot.news.reason(self.symbols)):
                 action, note = Action.BLOCKED, f"blackout: {news}"
         position_before = self.position
@@ -211,6 +214,7 @@ class PairsBot:
         self.exec = PairExecutor(broker, cfg)
         self.consecutive_errors = 0
         self.halted: str | None = None
+        self.paused: str | None = None        # set from Telegram /pause: no new entries
         self._report_day = None
         self._stop = asyncio.Event()
 
@@ -233,6 +237,7 @@ class PairsBot:
         if reset_halt:
             await self.db.set_control("halted", "")
             await self.db.set_control("emergency_stop", "")
+            await self.db.set_control("paused", "")
             for e in self.engines:
                 await self.db.set_control(f"retired:{e.name}", "")
             await self.db.log_circuit_event("halt_reset", by="operator")
@@ -294,6 +299,7 @@ class PairsBot:
         if stop:
             await self.halt(f"emergency stop: {stop}", flatten=True)
             return
+        self.paused = await self.db.get_control("paused") or None
 
         # 2. Account-level risk. last_equity is the previous close, so this is today's P&L.
         acct = await self.broker.account()
@@ -432,6 +438,8 @@ async def amain() -> None:
         with contextlib.suppress(NotImplementedError):  # Windows
             loop.add_signal_handler(sig, bot.request_stop)
     await bot.start(reset_halt=args.reset_halt)
+    commands = TelegramCommands(bot, cfg.telegram_token, cfg.telegram_chat_id)
+    listener = asyncio.create_task(commands.run()) if commands.enabled and args.cycles is None else None
     try:
         if not bot.halted:
             if hasattr(data, "start"):
@@ -440,7 +448,15 @@ async def amain() -> None:
                      ", ".join(e.name for e in bot.engines), cfg.mode, len(bot.blackout))
             await notifier.send(f"started: {', '.join(e.name for e in bot.engines)} ({cfg.mode})")
             await bot.run(max_cycles=args.cycles)
+        if bot.halted and listener is not None:
+            # Stay up so /status and /trades still answer from your phone while halted.
+            log.info("halted; still answering Telegram commands until stopped")
+            await bot._stop.wait()
     finally:
+        if listener is not None:
+            listener.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await listener
         if hasattr(data, "stop"):
             await data.stop()
         await bot.db.close()

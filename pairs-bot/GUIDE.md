@@ -44,7 +44,7 @@ These are my judgment calls, not measurements.
 
 | Question | Score | Why |
 |---|---|---|
-| Is the software well built? | **8.5/10** | Tested end to end (53 tests), with real safety rails: daily, weekly and monthly loss limits, stop button, leg-failure unwind, pair retirement, a halt that survives restarts, and no database lock-ups. It loses points because the Alpaca connection, limit orders and streaming haven't been run live yet. |
+| Is the software well built? | **8.5/10** | Tested end to end (58 tests), with real safety rails: daily, weekly and monthly loss limits, stop button, leg-failure unwind, pair retirement, a halt that survives restarts, and no database lock-ups. It loses points because the Alpaca connection, limit orders and streaming haven't been run live yet. |
 | Will it run on paper without problems? | **7/10** | Likely, after the first smoke test. Expect one or two small fixes on first contact with the real API. |
 | Will it make money as it is today? | **2–3/10** | Nothing has been backtested yet. KO/PEP on 1-minute bars is the most-watched pair there is, the edge per trade is tiny, and paying the spread on two market orders twice per round trip can eat it completely. |
 | Can it become profitable with the roadmap below? | **Maybe 20–30%** (now that steps 2–8 are built) | Pairs trading is a real, documented strategy, but its edge has shrunk as more people trade it. Success depends almost entirely on step 2 (backtesting) and step 3 (picking pairs). |

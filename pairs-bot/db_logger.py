@@ -243,6 +243,17 @@ class DBLogger:
                 row = await cur.fetchone()
         return None if row is None else row[0]
 
+    async def fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[tuple]:
+        """Read-only query helper (Telegram commands, reports)."""
+        assert self._conn is not None
+        async with self._lock:
+            async with self._conn.execute(sql, params) as cur:
+                return list(await cur.fetchall())
+
+    async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> tuple | None:
+        rows = await self.fetchall(sql, params)
+        return rows[0] if rows else None
+
     async def open_trade(self, pair: str | None = None) -> dict[str, Any] | None:
         """The pair trade that is still open, if any (used to resume after a restart).
 

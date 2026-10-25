@@ -22,7 +22,7 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-**Pass:** `53 passed` (about 4 minutes). This checks the maths, order sizing, limit-order
+**Pass:** `58 passed` (about 4 minutes). This checks the maths, order sizing, limit-order
 legging, the safety brakes (daily, weekly, pair retirement), the multi-pair portfolio,
 the database, the dashboard, the scanner, Monte Carlo and the backtester. If anything fails, send me the output.
 
