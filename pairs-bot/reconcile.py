@@ -45,7 +45,7 @@ async def run(cfg: Settings, broker=None, notifier: Notifier | None = None) -> l
         from execution import AlpacaBroker
 
         broker = AlpacaBroker(cfg)
-    notifier = notifier or Notifier(cfg.telegram_token, cfg.telegram_chat_id)
+    notifier = notifier or Notifier.from_settings(cfg)
     db = DBLogger(cfg.db_path)
     await db.open()
     try:

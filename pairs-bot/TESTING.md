@@ -133,7 +133,11 @@ streamlit run app.py
 ## Step 7. Move it to a server
 
 Once a few paper days look sane on your computer, follow [DEPLOY.md](DEPLOY.md)
-to run it on a small server with Telegram alerts.
+to run it on a small server with phone alerts.
+
+**Market watch on simulated prices.** `python watcher.py --source sim --fast --scans 300`, then
+`streamlit run app.py` and scroll to **Market watch**: grades for 28 pairs and demo-money
+results by grade and by hour. `python mcp_server.py` is what Jarvis talks to; see DEPLOY.md.
 
 ## Common problems
 

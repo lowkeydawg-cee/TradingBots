@@ -104,6 +104,8 @@ class Settings:
     data_source: str = "poll"               # "poll" (REST every bar) or "stream" (Alpaca websocket)
     telegram_token: str = field(default="", repr=False)
     telegram_chat_id: str = ""
+    ntfy_topic: str = field(default="", repr=False)   # phone push via the free ntfy app (no account)
+    ntfy_server: str = "https://ntfy.sh"
     notify_trades: bool = True              # also send a message on each open/close (halts always alert)
 
     # --- storage -----------------------------------------------------------------
@@ -204,6 +206,8 @@ def load_settings(**overrides: object) -> Settings:
         data_source=_env("DATA_SOURCE", "poll").lower(),
         telegram_token=_env("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=_env("TELEGRAM_CHAT_ID", ""),
+        ntfy_topic=_env("NTFY_TOPIC", ""),
+        ntfy_server=_env("NTFY_SERVER", "https://ntfy.sh").rstrip("/"),
         notify_trades=_env("NOTIFY_TRADES", "1") not in ("0", "false", "no"),
     )
     values.update(overrides)

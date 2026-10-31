@@ -236,6 +236,71 @@ def live_panel() -> None:
 
 live_panel()
 
+
+# ---------------------------------------------------------------------------
+# Market watch (filled by watcher.py): grades for every pair + demo-money results
+# ---------------------------------------------------------------------------
+GRADE_ORDER = {"STRONG": 0, "RISKY": 1, "AVOID": 2, "WATCH": 3, "QUIET": 4}
+
+
+def shadow_stats(shadow: pd.DataFrame, by: str) -> pd.DataFrame:
+    closed = shadow.dropna(subset=["closed_at"])
+    if closed.empty:
+        return pd.DataFrame()
+    g = closed.groupby(by)["net_pnl"]
+    return pd.DataFrame({"trades": g.size(), "win rate": g.apply(lambda x: f"{(x > 0).mean():.0%}"),
+                         "net P&L ($)": g.sum().round(2), "avg ($)": g.mean().round(2)}).reset_index()
+
+
+@st.fragment(run_every=max(refresh, 30))
+def watch_panel() -> None:
+    try:
+        latest = query(db_path, "SELECT o.* FROM opportunities o JOIN (SELECT pair, MAX(id) AS id FROM opportunities "
+                                "GROUP BY pair) m ON o.id = m.id")
+        shadow = query(db_path, "SELECT * FROM shadow_trades ORDER BY id")
+    except Exception:
+        return                                       # watcher never ran: no tables yet
+    if latest.empty:
+        return
+    st.divider()
+    st.subheader("🔭 Market watch")
+    st.caption("Every pair in every sector, graded on its latest bar by `watcher.py`. The win rate is how this "
+               "rule set did on the pair recently, after costs, not a prediction. Every STRONG, RISKY and AVOID signal "
+               "is traded with demo money below (AVOID is the control group), so you can see whether the grades hold up.")
+    counts = latest["grade"].value_counts()
+    cols = st.columns(len(GRADE_ORDER))
+    for col, grade in zip(cols, GRADE_ORDER):
+        col.metric(grade.title(), int(counts.get(grade, 0)))
+    board = latest.assign(order=latest["grade"].map(GRADE_ORDER)).sort_values(["order", "prob"], ascending=[True, False])
+    board["updated"] = pd.to_datetime(board["bar_time"], unit="s", utc=True)
+    show = board[["grade", "pair", "sector", "side", "zscore", "prob", "hist_trades", "coint_pvalue", "half_life",
+                  "flags", "updated"]].rename(columns={"prob": "recent win rate", "hist_trades": "past trades"})
+    st.dataframe(show.round({"zscore": 2, "recent win rate": 2, "coint_pvalue": 3, "half_life": 1}),
+                 width="stretch", hide_index=True)
+
+    st.markdown("**Demo-money results by grade**: do STRONG signals really beat RISKY ones?")
+    by_grade = shadow_stats(shadow, "grade")
+    if by_grade.empty:
+        st.caption("No shadow trades closed yet. They appear after the first signals revert or stop out.")
+        return
+    left, right = st.columns(2)
+    left.dataframe(by_grade, width="stretch", hide_index=True)
+    by_hour = shadow_stats(shadow, "entry_hour")
+    if not by_hour.empty:
+        fig = go.Figure(go.Bar(x=by_hour["entry_hour"], y=by_hour["avg ($)"],
+                               text=by_hour["trades"].astype(str) + " trades", textposition="outside"))
+        fig.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10), title="Avg demo P&L by entry hour (New York)",
+                          xaxis_title="hour", yaxis_title="$ per trade")
+        right.plotly_chart(fig, width="stretch")
+    with st.expander("By pair"):
+        st.dataframe(shadow_stats(shadow, "pair").sort_values("net P&L ($)", ascending=False),
+                     width="stretch", hide_index=True)
+    with st.expander("Open demo trades"):
+        st.dataframe(shadow[shadow["closed_at"].isna()], width="stretch", hide_index=True)
+
+
+watch_panel()
+
 # ---------------------------------------------------------------------------
 # Emergency stop (outside the auto-refreshing fragment so it is not re-rendered mid-click)
 # ---------------------------------------------------------------------------

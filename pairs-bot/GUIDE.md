@@ -104,7 +104,7 @@ is currently unchecked.
 
 **Step 8. Run it like a service. ✅ Built: Docker and systemd files, streaming prices, Telegram alerts, a daily report and a nightly reconciliation job. See [DEPLOY.md](DEPLOY.md).** Host it on a small always-on server
 (a $5–10/month VPS) under systemd so it restarts after crashes. Send alerts
-(Telegram or email) on any halt, plus a daily summary.
+(the ntfy app or Telegram) on any halt, plus a daily summary. ✅ Also built: an all-day market watcher that grades every pair and trades every signal with demo money, and a Jarvis connection (`mcp_server.py`).
 *Why:* a bot on a laptop stops when the laptop sleeps, and a halted bot that
 nobody notices is just lost time.
 

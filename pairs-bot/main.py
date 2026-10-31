@@ -429,7 +429,7 @@ async def amain() -> None:
         raise SystemExit("--fast is only allowed in sim mode")
 
     data, broker, clock = build(cfg)
-    notifier = Notifier(cfg.telegram_token, cfg.telegram_chat_id)
+    notifier = Notifier.from_settings(cfg)
     news = (NewsGuard(cfg.api_key, cfg.secret_key, cfg.news_pause_minutes)
             if cfg.mode == "alpaca" and cfg.news_pause_minutes > 0 else None)
     bot = PairsBot(cfg, data, broker, DBLogger(cfg.db_path), clock, notifier=notifier, news=news)
