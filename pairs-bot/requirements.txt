@@ -6,3 +6,4 @@ statsmodels>=0.14
 streamlit>=1.37
 plotly>=5.20
 python-dotenv>=1.0
+mcp>=1.2           # Jarvis / MCP assistants (mcp_server.py)
