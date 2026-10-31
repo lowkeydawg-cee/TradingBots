@@ -31,8 +31,9 @@ pairs-bot/
 ├── watcher.py       # all-day market watch: grades every pair, trades every signal with demo money
 ├── insights.py      # the watcher's market brief and alerts: mood, sectors, pairs breaking
 ├── mcp_server.py    # lets Jarvis (or any MCP assistant) read and control the bot by voice
+├── connect_jarvis.py  # one command: adds the bot to Jarvis's config.yaml and checks it works
 ├── Dockerfile, docker-compose.yml, deploy/   # run it on a server (see DEPLOY.md)
-├── tests/           # 71 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
+├── tests/           # 75 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
 ├── .env.example     # every setting, explained
 └── requirements.txt
 ```
