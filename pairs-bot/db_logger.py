@@ -127,6 +127,16 @@ CREATE TABLE IF NOT EXISTS shadow_trades (
     exit_reason  TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_opps_ts ON opportunities(ts);
+
+-- The watcher's view of the market: a brief every scan, and alerts when it changes
+CREATE TABLE IF NOT EXISTS market_notes (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts    REAL NOT NULL,
+    kind  TEXT NOT NULL,            -- brief | alert
+    mood  TEXT,
+    text  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_notes_ts ON market_notes(kind, ts);
 CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
 CREATE INDEX IF NOT EXISTS ix_equity_ts ON equity(ts);
 """

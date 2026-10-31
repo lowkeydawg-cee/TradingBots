@@ -117,6 +117,18 @@ that answers the real questions: do STRONG signals beat RISKY ones, does
 AVOID really lose, and are some hours better than others? Until there are
 dozens of demo trades per grade, treat the differences as noise.
 
+**How it sees the market.** Every scan the watcher also writes a market brief:
+the mood (are moves calm, normal or stressed compared with recent weeks), how
+many pairs still move together, each sector's move today, and what changed
+(pairs that broke or recovered, new STRONG signals). Your phone gets the full
+brief three times a day (9:45, 12:30 and 16:00 New York) and an alert the moment
+something material changes: the market turns stressed or calms down, a sector
+gets stressed, most pairs decouple, a pair the bot trades (or a STRONG one)
+breaks, or stocks move 1.5% or more on the day. The latest brief and the day's
+alerts sit at the top of the dashboard's Market watch section, and Jarvis reads
+them when you ask "how does the market look?". The brief describes what prices
+are doing now; it is not a forecast.
+
 Try it on your laptop with simulated prices: `python watcher.py --source sim --fast --scans 300`,
 then `streamlit run app.py`.
 
@@ -137,7 +149,7 @@ mcp:
       command: ssh
       args: [bot@<server>.ts.net, "cd TradingBots/pairs-bot && docker compose exec -T bot python mcp_server.py"]
       confirm: false
-      allow_tools: [get_bot_status, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
+      allow_tools: [get_bot_status, get_market_brief, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
     trading_control:     # actions: Jarvis asks you first
       command: ssh
       args: [bot@<server>.ts.net, "cd TradingBots/pairs-bot && docker compose exec -T bot python mcp_server.py"]
@@ -158,7 +170,7 @@ mcp:
       args: [C:/Users/<you>/TradingBots/pairs-bot/mcp_server.py]
       env: {PAIRS_DB_PATH: C:/Users/<you>/TradingBots/pairs-bot/pairs_bot.db}
       confirm: false
-      allow_tools: [get_bot_status, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
+      allow_tools: [get_bot_status, get_market_brief, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
     trading_control:
       command: C:/Users/<you>/TradingBots/pairs-bot/.venv/Scripts/python.exe
       args: [C:/Users/<you>/TradingBots/pairs-bot/mcp_server.py]
@@ -171,7 +183,7 @@ This works with Jarvis's default Groq brain (`llm.provider: hybrid`, `GROQ_API_K
 Groq's `llama-3.3-70b-versatile` supports tool calling, and Jarvis's own MCP
 client was checked against this server (it lists all 9 tools and calls them).
 
-Jarvis then has these tools: `get_bot_status`, `get_market_watch`, `explain`
+Jarvis then has these tools: `get_bot_status`, `get_market_brief` ("Jarvis, how does the market look?"), `get_market_watch`, `explain`
 (why a pair is graded the way it is), `get_recent_trades`, `get_profit`,
 `get_demo_results`, `pause`, `resume` and `stop_everything` (needs
 `confirm=true`). Reading is all it does unless you ask it to pause or stop.

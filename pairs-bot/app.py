@@ -267,6 +267,19 @@ def watch_panel() -> None:
     st.caption("Every pair in every sector, graded on its latest bar by `watcher.py`. The win rate is how this "
                "rule set did on the pair recently, after costs, not a prediction. Every STRONG, RISKY and AVOID signal "
                "is traded with demo money below (AVOID is the control group), so you can see whether the grades hold up.")
+    try:
+        notes = query(db_path, "SELECT ts, kind, text FROM market_notes WHERE id IN (SELECT MAX(id) FROM market_notes "
+                               "WHERE kind = 'brief') OR (kind = 'alert' AND ts >= (SELECT MAX(ts) FROM market_notes) - 86400) "
+                               "ORDER BY id DESC LIMIT 7")
+    except Exception:
+        notes = pd.DataFrame()
+    if not notes.empty:
+        brief = notes[notes["kind"] == "brief"]
+        if not brief.empty:
+            st.info(brief.iloc[0]["text"])
+        for _, alert in notes[notes["kind"] == "alert"].iterrows():
+            when = pd.to_datetime(alert["ts"], unit="s", utc=True).tz_convert("America/New_York").strftime("%a %H:%M")
+            st.warning(f"{when} NY: {alert['text']}")
     counts = latest["grade"].value_counts()
     cols = st.columns(len(GRADE_ORDER))
     for col, grade in zip(cols, GRADE_ORDER):

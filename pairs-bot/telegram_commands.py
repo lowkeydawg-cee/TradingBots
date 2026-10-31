@@ -6,6 +6,7 @@ any other chat are ignored, so a stranger who finds your bot can't use it.
     /status          running or halted, equity, today's P&L, open trades
     /trades          the last 5 closed trades
     /pnl             profit today, this week, and all time
+    /market          how the market looks right now, and today's alerts
     /watch           the market watcher's best opportunities right now
     /pause           no new trades (open ones still exit normally)
     /resume          allow new trades again
@@ -38,6 +39,7 @@ NY = ZoneInfo("America/New_York")
 HELP = ("/status  running or halted, equity, open trades\n"
         "/trades  last 5 closed trades\n"
         "/pnl  profit today, this week, all time\n"
+        "/market  how the market looks, today's alerts\n"
         "/watch  best opportunities right now\n"
         "/pause  no new trades\n"
         "/resume  allow new trades\n"
@@ -96,7 +98,7 @@ class TelegramCommands:
     async def handle(self, text: str) -> str:
         cmd, *args = text.split()
         cmd = cmd.split("@")[0].lower()                     # /status@MyBot in group chats
-        handler = {"/status": self._status, "/trades": self._trades, "/pnl": self._pnl, "/watch": self._watch,
+        handler = {"/status": self._status, "/trades": self._trades, "/pnl": self._pnl, "/watch": self._watch, "/market": self._market,
                    "/pause": self._pause, "/resume": self._resume, "/stop": self._stop,
                    "/help": self._help, "/start": self._help}.get(cmd)
         if handler is None:
@@ -172,6 +174,10 @@ class TelegramCommands:
         if shadow:
             out.append("Demo results: " + ", ".join(f"{g} {n} trades ${p:+,.2f}" for g, n, p in shadow))
         return "\n".join(out)
+
+    async def _market(self, args: list[str]) -> str:
+        import mcp_server
+        return await asyncio.to_thread(mcp_server.market_brief, self.bot.cfg.db_path)
 
     async def _pause(self, args: list[str]) -> str:
         await self.bot.db.set_control("paused", "telegram")
