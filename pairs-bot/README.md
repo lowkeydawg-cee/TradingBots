@@ -29,9 +29,10 @@ pairs-bot/
 ├── telegram_commands.py  # control from your phone: /status /trades /pnl /pause /resume /stop
 ├── reconcile.py     # nightly check that our records match the broker
 ├── watcher.py       # all-day market watch: grades every pair, trades every signal with demo money
+├── insights.py      # the watcher's market brief and alerts: mood, sectors, pairs breaking
 ├── mcp_server.py    # lets Jarvis (or any MCP assistant) read and control the bot by voice
 ├── Dockerfile, docker-compose.yml, deploy/   # run it on a server (see DEPLOY.md)
-├── tests/           # 66 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
+├── tests/           # 71 tests: math, sizing, leg risk, halts, portfolio, scanner, dashboard, backtester
 ├── .env.example     # every setting, explained
 └── requirements.txt
 ```
@@ -67,8 +68,8 @@ python scanner.py --source alpaca --start 2026-01-01 --end 2026-10-01 --timefram
 | **Smarter model** | Kalman-filter hedge ratio that adapts bar by bar; 5–15 minute bars; no entries while spread moves are 3x normal; stay out on earnings days and for 30 minutes after a headline | `HEDGE_METHOD=kalman`, `TIMEFRAME_MINUTES`, `MAX_VOL_RATIO`, `BLACKOUT_FILE`, `NEWS_PAUSE_MINUTES` |
 | **Multi-pair portfolio** | One engine per pair under shared exposure and loss caps. Optional sizing so every stop-out loses about the same dollars. Weekly and monthly loss halts. A pair whose cointegration stays broken for N days is retired | `PAIRS`, `RISK_PER_TRADE_USD`, `MAX_WEEKLY_LOSS_PCT`, `MAX_MONTHLY_LOSS_PCT`, `RETIRE_PVALUE`, `RETIRE_DAYS` |
 | **Run as a service** | One-command server setup (`deploy/setup.sh`), Docker or systemd, streaming prices, Telegram alerts **and commands** (`/status`, `/pause`, `/stop confirm`...), a password-protected dashboard reachable privately from your laptop and phone through Tailscale, a daily report and a nightly reconciliation | [DEPLOY.md](DEPLOY.md), `DATA_SOURCE=stream`, `NTFY_TOPIC`, `TELEGRAM_*`, `DASHBOARD_PASSWORD` |
-| **Market watch** | `watcher.py` scans every pair in every sector all day on 15-minute bars and grades each one STRONG, RISKY, AVOID, WATCH or QUIET, with the reasons. Its "probability" is the pair's measured recent win rate after costs, not a forecast. Every STRONG, RISKY and AVOID signal is traded with demo money, so the dashboard shows whether the grades and the entry hours really matter | `python watcher.py --help`, dashboard "Market watch", [DEPLOY.md](DEPLOY.md#market-watch) |
-| **Jarvis and no-Telegram control** | Ask your Jarvis assistant "how's the trading bot?", "what's strong right now?" or "pause trading" through `mcp_server.py`. Phone alerts through the free ntfy app, no account | [DEPLOY.md](DEPLOY.md#jarvis) |
+| **Market watch** | `watcher.py` scans every pair in every sector all day on 15-minute bars and grades each one STRONG, RISKY, AVOID, WATCH or QUIET, with the reasons. Its "probability" is the pair's measured recent win rate after costs, not a forecast. Every STRONG, RISKY and AVOID signal is traded with demo money, so the dashboard shows whether the grades and the entry hours really matter. It also writes a market brief (mood, sectors, pairs breaking) and alerts your phone when the market changes | `python watcher.py --help`, dashboard "Market watch", [DEPLOY.md](DEPLOY.md#market-watch) |
+| **Jarvis and no-Telegram control** | Ask your Jarvis assistant "how's the trading bot?", "how does the market look?", "what's strong right now?" or "pause trading" through `mcp_server.py`. Phone alerts through the free ntfy app, no account | [DEPLOY.md](DEPLOY.md#jarvis) |
 
 Everything is off or conservative by default except limit orders, which are
 cheaper. With no `PAIRS` set the bot trades `PAIR_SYMBOL_A/B` exactly as before.

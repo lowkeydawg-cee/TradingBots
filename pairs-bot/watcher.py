@@ -62,6 +62,7 @@ from blackout import Blackout
 from config import Settings, load_settings
 from db_logger import DBLogger
 from execution import pair_pnl, plan_pair
+from insights import Insights
 from notify import Notifier
 from scanner import UNIVERSES
 from strategy import Action, Position, compute_spread_stats, decide
@@ -326,7 +327,8 @@ class AlpacaSource:
 class Watcher:
     def __init__(self, cfg: Settings, source, db: DBLogger, *, costs: Costs = Costs(), history_bars: int = 1560,
                  refresh_seconds: float = 86_400, all_hours: bool = False, notifier: Notifier | None = None,
-                 blackout: Blackout | None = None, min_prob: float = 0.6) -> None:
+                 blackout: Blackout | None = None, min_prob: float = 0.6,
+                 watched_pairs: set[str] | None = None) -> None:
         self.cfg, self.source, self.db, self.costs = cfg, source, db, costs
         self.history_bars, self.refresh_seconds, self.all_hours = history_bars, refresh_seconds, all_hours
         self.notifier = notifier or Notifier(prefix="watcher")
@@ -335,6 +337,8 @@ class Watcher:
         self.book = ShadowBook(db, cfg, costs)
         self._history: dict[str, tuple[float, History]] = {}
         self._last_grade: dict[str, str] = {}
+        self.insights = Insights({f"{a}/{b}" for a, b in (cfg.pairs or ())} | set(watched_pairs or ()))
+        self.last_read = None
 
     def pairs(self) -> list[tuple[tuple[str, str], str]]:
         return [((a, b), sector) for sector, syms in self.source.sectors.items()
@@ -369,7 +373,24 @@ class Watcher:
                                          f"{opp.prob:.0%} over {opp.hist_trades} trades (shadow trade {change or 'held'})")
             self._last_grade[name] = opp.grade
             out.append(opp)
+        if out:
+            await self._insights(out, closes, now)
         return out
+
+    async def _insights(self, opps: list[Opportunity], closes: pd.DataFrame, now: float) -> None:
+        read, alerts = self.insights.update(opps, closes, now)
+        self.last_read = read
+        slot = self.insights.brief_due(now)
+        text = read.text(slot or "")
+        await self.db._write("INSERT INTO market_notes (ts, kind, mood, text) VALUES (?,?,?,?)",
+                             (now, "brief", read.mood, text))
+        for alert in alerts:
+            await self.db._write("INSERT INTO market_notes (ts, kind, mood, text) VALUES (?,?,?,?)",
+                                 (now, "alert", read.mood, alert))
+            await self.notifier.send(alert)
+        if slot:
+            await self.notifier.send(text)
+            self.insights.mark_sent(now, slot)
 
     async def _record(self, o: Opportunity) -> None:
         await self.db._write(
@@ -414,7 +435,8 @@ async def amain(argv: list[str] | None = None) -> None:
     watcher = Watcher(cfg, source, db, costs=Costs(spread_bps=args.spread_bps), refresh_seconds=refresh,
                       history_bars=cfg.hedge_lookback * 4 if args.source == "sim" else 40 * round(390 / args.timeframe),
                       all_hours=all_hours, notifier=Notifier.from_settings(base, "watcher"),
-                      blackout=Blackout(base.blackout_file), min_prob=args.min_prob)
+                      blackout=Blackout(base.blackout_file), min_prob=args.min_prob,
+                      watched_pairs={f"{a}/{b}" for a, b in base.all_pairs})
     await watcher.book.load()
     log.info("watching %d pairs on %d-minute bars", len(watcher.pairs()), args.timeframe)
     scans = 0

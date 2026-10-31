@@ -4,6 +4,7 @@ This is a Model Context Protocol server. Jarvis starts it, sees the tools
 below, and its model calls them when you ask about the bot:
 
     bot_status       running, paused or halted; equity; open trades; last heartbeat
+    market_brief     how the market looks: mood, sectors, what changed, recent alerts
     market_watch     the watcher's best opportunities right now, with their warnings
     explain_pair     why a pair is graded the way it is, and what the bot did with it lately
     recent_trades    the last closed trades, real paper and demo (shadow)
@@ -107,6 +108,21 @@ def market_watch(limit: int = 8, path: str | None = None) -> str:
         line += f", signal {side}" if side else ""
         line += f". Warnings: {flags}" if flags else ""
         out.append(line + ".")
+    return "\n".join(out)
+
+
+def market_brief(path: str | None = None) -> str:
+    """The watcher's latest read of the market, plus the alerts of the last 24 hours."""
+    brief = _rows("SELECT ts, text FROM market_notes WHERE kind = 'brief' ORDER BY id DESC LIMIT 1", (), path)
+    if not brief:
+        return "No market brief yet. The market watcher writes one every scan: start it with python watcher.py."
+    ts, text = brief[0]
+    alerts = _rows("SELECT ts, text FROM market_notes WHERE kind = 'alert' AND ts >= ? ORDER BY id DESC LIMIT 6",
+                   (ts - 86_400,), path)
+    out = [f"(written {_ago(ts)})", text]
+    if alerts:
+        out.append("Alerts in the last day:")
+        out += [f"- {_ago(t)}: {a}" for t, a in alerts]
     return "\n".join(out)
 
 
@@ -236,6 +252,12 @@ def build_server():
     def get_market_watch(limit: int = 8) -> str:
         """The best trading opportunities right now (STRONG, RISKY, AVOID, WATCH) with their warnings."""
         return market_watch(limit)
+
+    @server.tool()
+    def get_market_brief() -> str:
+        """How the market looks right now: calm or stressed, which sectors move, how many pairs still move
+        together, what changed today, and recent alerts. Descriptive, not a forecast."""
+        return market_brief()
 
     @server.tool()
     def explain(pair: str) -> str:
