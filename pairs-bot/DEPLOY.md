@@ -7,19 +7,21 @@
 ```
                  ┌──────────────── your $5/month server (always on) ────────────────┐
  Alpaca paper ◄──┤  bot (Docker)  ──writes──►  pairs_bot.db  ◄──reads──  dashboard   │
-  (fake money,   │     │  ▲                                                  │        │
-   real prices)  │     │  └── Telegram commands (/status /pause /stop)       │        │
+  (fake money,   │  watcher (Docker) ──writes──┘      ▲                       │        │
+   real prices)  │     │                              └── Jarvis (MCP)        │        │
                  └─────┼──────────────────────────────────────────────────────┼───────┘
-                       │ alerts + replies                       private HTTPS │ (Tailscale)
+                       │ alerts                                 private HTTPS │ (Tailscale)
                        ▼                                                      ▼
-                 📱 Telegram app                          💻 laptop browser   📱 phone browser
+                 📱 ntfy app (or Telegram)                💻 laptop browser   📱 phone browser
                                                           https://<server>.ts.net
 ```
 
 | Where you are | What you use | What you can do |
 |---|---|---|
-| **Phone** | Telegram | Get every trade, halt and the daily report. Send `/status`, `/trades`, `/pnl`, `/pause`, `/resume`, `/stop confirm` |
-| **Phone** | Browser + Tailscale app | The full dashboard: charts, trades, emergency stop |
+| **Phone** | ntfy app (free, no account) | Get every trade, halt, new STRONG signal and the daily report as push notifications. Halts ring as urgent |
+| **Phone** | Browser + Tailscale app | The full dashboard: charts, trades, market watch, pause and emergency stop |
+| **Laptop or phone** | Your Jarvis assistant | Ask by voice or in its web page: "how's the trading bot?", "what's strong right now?", "pause trading". See [Jarvis](#jarvis) |
+| **Phone (optional)** | Telegram | Same alerts, plus commands: `/status`, `/trades`, `/pnl`, `/watch`, `/pause`, `/resume`, `/stop confirm` |
 | **Laptop** | Browser + Tailscale app | The same dashboard |
 | **Any browser** | app.alpaca.markets | Alpaca's own view of your paper account: orders, positions, balance |
 
@@ -38,10 +40,12 @@ The dashboard password (`DASHBOARD_PASSWORD`) is a second lock.
 
 1. **Alpaca paper account**: sign up at https://alpaca.markets (free), open the
    **Paper** dashboard, generate an API key and secret.
-2. **Telegram bot** (5 minutes): message **@BotFather**, send `/newbot`, copy the
-   token. Send any message to your new bot, then open
-   `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy the number after
-   `"chat":{"id":`.
+2. **ntfy app** (2 minutes, no account): install **ntfy** from the App Store or
+   Play Store, tap **+**, and subscribe to a topic name only you know, like
+   `pairs-saint-7f3k9q2x`. Anyone who guesses the name can read your alerts, so
+   make it long and random. (Telegram also works if you ever want it: message
+   **@BotFather**, `/newbot`, and copy the token and your chat id from
+   `https://api.telegram.org/bot<TOKEN>/getUpdates`. It's optional.)
 3. **Tailscale account**: install the Tailscale app on your phone and laptop and
    log in (free for personal use, https://tailscale.com/download).
 4. **A server**: Hetzner (CX22), DigitalOcean or Vultr, Ubuntu 24.04, 1–2 GB RAM,
@@ -57,12 +61,12 @@ less setup.sh          # read it first; it's short
 bash setup.sh
 ```
 
-It asks for your Alpaca paper keys, the Telegram token and chat id, and a
-dashboard password. It then:
+It asks for your Alpaca paper keys, your ntfy topic, a dashboard password,
+and (optional, press Enter to skip) a Telegram token and chat id. It then:
 
 1. creates a `bot` user, installs Docker, and closes every port except SSH;
 2. downloads the code and writes `.env` (readable only by the `bot` user);
-3. starts the bot and the dashboard (they restart on crashes and reboots);
+3. starts the bot, the market watcher and the dashboard (they restart on crashes and reboots);
 4. installs Tailscale and prints a login link: log in with the **same account**
    as your phone and laptop. If it asks you to enable HTTPS certificates, click
    the link, enable them, and run `bash setup.sh` again;
@@ -72,15 +76,15 @@ At the end it prints your dashboard address, like
 `https://pairs-server.tail1234.ts.net`. Open it on your laptop and phone
 (with Tailscale switched on), enter the password, and add it to your home screen.
 
-Then send `/status` to your Telegram bot. It should answer with "Running" and your paper equity.
+Within a minute your phone should get an ntfy notification that the bot started.
 
 ## Day-to-day
 
 | Task | How |
 |---|---|
-| Is it running? | `/status` in Telegram, or `docker compose ps` on the server |
-| Stop new trades for a while | `/pause` (open trades still exit normally), later `/resume` |
-| Emergency | `/stop confirm` in Telegram, or the red button on the dashboard: flattens everything and halts |
+| Is it running? | the dashboard, "Jarvis, how's the trading bot?", or `docker compose ps` on the server |
+| Stop new trades for a while | the dashboard's pause, "Jarvis, pause trading" (or `/pause` in Telegram); open trades still exit normally |
+| Emergency | the red button on the dashboard, "Jarvis, stop everything" (it asks you to confirm), or `/stop confirm` in Telegram: flattens everything and halts |
 | Clear a halt after reviewing it | on the server: `cd ~/TradingBots/pairs-bot && docker compose run --rm bot python main.py --reset-halt --cycles 1 && docker compose restart bot` |
 | See the log | `docker compose logs -f bot` |
 | Upgrade | `git pull && docker compose up -d --build` (or run `setup.sh` again) |
@@ -89,7 +93,68 @@ Then send `/status` to your Telegram bot. It should answer with "Running" and yo
 | Measure your real costs | `docker compose run --rm bot python backtest.py --source alpaca --start ... --end ... --costs-from-db /data/pairs_bot.db` |
 
 The bot only acts during US market hours (9:30–16:00 New York). Outside them,
-`/status` still answers, and the daily report arrives shortly after the close.
+the dashboard and Jarvis still answer, and the daily report arrives shortly after the close.
+
+## Market watch
+
+The `watcher` service scans every pair in every sector all day on 15-minute bars
+and grades each one:
+
+| Grade | Means | Demo trade? |
+|---|---|---|
+| STRONG | a signal, the pair is cointegrated, and this rule set has won often on it recently after costs | yes |
+| RISKY | a signal with a warning: weak cointegration, few past trades, a volatility spike, earnings, a recent losing streak | yes |
+| AVOID | a signal on a pair that looks broken: not cointegrated, past the stop line, or doesn't revert | yes, as the control group |
+| WATCH | healthy pair, no signal yet | no |
+| QUIET | nothing to do | no |
+
+The "win rate" is how the bot's rules did on that pair over the last few weeks,
+shrunk toward 50% when there are few trades. It is a measurement, not a
+prediction. Every STRONG, RISKY and AVOID signal is traded with demo money
+(no orders are sent anywhere), and the dashboard's **Market watch** section
+shows the results by grade, by pair and by hour of entry. After a few weeks
+that answers the real questions: do STRONG signals beat RISKY ones, does
+AVOID really lose, and are some hours better than others? Until there are
+dozens of demo trades per grade, treat the differences as noise.
+
+Try it on your laptop with simulated prices: `python watcher.py --source sim --fast --scans 300`,
+then `streamlit run app.py`.
+
+## Jarvis
+
+`mcp_server.py` lets your Jarvis assistant (or any assistant that speaks MCP,
+including Claude Desktop) read and control the bot. Add one of these to
+Jarvis's `config.yaml` under `mcp.servers`.
+
+**Bot on the server, Jarvis on your PC** (the usual setup). Jarvis starts the
+tool over SSH inside the bot's container; Tailscale makes the address reachable
+only from your devices. Set up an SSH key from your PC to the `bot` user first.
+
+```yaml
+mcp:
+  servers:
+    trading:
+      command: ssh
+      args: [bot@<server>.ts.net, "cd TradingBots/pairs-bot && docker compose exec -T bot python mcp_server.py"]
+      confirm: true      # Jarvis asks before pause / resume / stop
+```
+
+**Bot and Jarvis on the same computer:**
+
+```yaml
+mcp:
+  servers:
+    trading:
+      command: C:/Users/<you>/TradingBots/pairs-bot/.venv/Scripts/python.exe
+      args: [C:/Users/<you>/TradingBots/pairs-bot/mcp_server.py]
+      env: {PAIRS_DB_PATH: C:/Users/<you>/TradingBots/pairs-bot/pairs_bot.db}
+      confirm: true
+```
+
+Jarvis then has these tools: `get_bot_status`, `get_market_watch`, `explain`
+(why a pair is graded the way it is), `get_recent_trades`, `get_profit`,
+`get_demo_results`, `pause`, `resume` and `stop_everything` (needs
+`confirm=true`). Reading is all it does unless you ask it to pause or stop.
 
 ## Without Docker (systemd)
 

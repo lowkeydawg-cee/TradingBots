@@ -6,6 +6,7 @@ any other chat are ignored, so a stranger who finds your bot can't use it.
     /status          running or halted, equity, today's P&L, open trades
     /trades          the last 5 closed trades
     /pnl             profit today, this week, and all time
+    /watch           the market watcher's best opportunities right now
     /pause           no new trades (open ones still exit normally)
     /resume          allow new trades again
     /stop confirm    EMERGENCY: close every position and halt
@@ -37,6 +38,7 @@ NY = ZoneInfo("America/New_York")
 HELP = ("/status  running or halted, equity, open trades\n"
         "/trades  last 5 closed trades\n"
         "/pnl  profit today, this week, all time\n"
+        "/watch  best opportunities right now\n"
         "/pause  no new trades\n"
         "/resume  allow new trades\n"
         "/stop confirm  close everything and halt\n"
@@ -94,7 +96,7 @@ class TelegramCommands:
     async def handle(self, text: str) -> str:
         cmd, *args = text.split()
         cmd = cmd.split("@")[0].lower()                     # /status@MyBot in group chats
-        handler = {"/status": self._status, "/trades": self._trades, "/pnl": self._pnl,
+        handler = {"/status": self._status, "/trades": self._trades, "/pnl": self._pnl, "/watch": self._watch,
                    "/pause": self._pause, "/resume": self._resume, "/stop": self._stop,
                    "/help": self._help, "/start": self._help}.get(cmd)
         if handler is None:
@@ -147,6 +149,29 @@ class TelegramCommands:
             n, pnl, wins = row
             parts.append(f"{label}: ${pnl:+,.2f} from {n} trades ({wins} wins)")
         return "\n".join(parts)
+
+    async def _watch(self, args: list[str]) -> str:
+        db = self.bot.db
+        rows = await db.fetchall(
+            "SELECT o.grade, o.pair, o.side, o.zscore, o.prob, o.hist_trades, o.flags FROM opportunities o "
+            "JOIN (SELECT pair, MAX(id) AS id FROM opportunities GROUP BY pair) m ON o.id = m.id "
+            "WHERE o.grade != 'QUIET' ORDER BY CASE o.grade WHEN 'STRONG' THEN 0 WHEN 'RISKY' THEN 1 WHEN 'AVOID' THEN 2 ELSE 3 END, "
+            "o.prob DESC LIMIT 8")
+        if not rows:
+            return "No opportunities right now (or the watcher isn't running: python watcher.py)."
+        out = []
+        for grade, pair, side, z, prob, n, flags in rows:
+            line = f"{grade} {pair} z={z:+.2f} win rate {prob:.0%} ({n} trades)"
+            if side:
+                line += f" -> {side}"
+            if flags:
+                line += f"\n   ! {flags}"
+            out.append(line)
+        shadow = await db.fetchall("SELECT grade, COUNT(*), COALESCE(SUM(net_pnl), 0) FROM shadow_trades "
+                                   "WHERE closed_at IS NOT NULL GROUP BY grade")
+        if shadow:
+            out.append("Demo results: " + ", ".join(f"{g} {n} trades ${p:+,.2f}" for g, n, p in shadow))
+        return "\n".join(out)
 
     async def _pause(self, args: list[str]) -> str:
         await self.bot.db.set_control("paused", "telegram")

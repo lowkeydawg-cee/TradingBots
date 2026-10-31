@@ -96,6 +96,37 @@ CREATE TABLE IF NOT EXISTS control (
     value      TEXT NOT NULL,
     updated_at REAL NOT NULL
 );
+-- Market watcher (watcher.py): a grade for every pair at every scan, and the
+-- demo-money "shadow" trades it takes on every signal so grades can be compared.
+CREATE TABLE IF NOT EXISTS opportunities (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             REAL NOT NULL,
+    bar_time       REAL NOT NULL,
+    pair           TEXT NOT NULL,
+    sector         TEXT,
+    grade          TEXT NOT NULL,     -- STRONG / RISKY / WATCH / QUIET
+    side           TEXT,              -- LONG_SPREAD / SHORT_SPREAD when there is a signal
+    zscore         REAL, coint_pvalue REAL, half_life REAL, vol_ratio REAL, beta REAL,
+    hist_trades    INTEGER, hist_win_rate REAL, prob REAL, hist_avg_net REAL, breakeven_bps REAL,
+    flags          TEXT               -- risk warnings, "; "-separated
+);
+CREATE TABLE IF NOT EXISTS shadow_trades (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair         TEXT NOT NULL,
+    grade        TEXT NOT NULL,       -- grade when it opened
+    flags        TEXT,
+    direction    TEXT NOT NULL,
+    opened_at    REAL NOT NULL,       -- bar time
+    entry_hour   INTEGER,             -- New York hour of the entry, for time-of-day stats
+    entry_z      REAL NOT NULL,
+    prob         REAL,
+    qty_a        REAL NOT NULL, qty_b REAL NOT NULL,
+    entry_a      REAL NOT NULL, entry_b REAL NOT NULL,
+    closed_at    REAL, exit_z REAL, exit_a REAL, exit_b REAL,
+    gross_pnl    REAL, costs REAL, net_pnl REAL,
+    exit_reason  TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_opps_ts ON opportunities(ts);
 CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
 CREATE INDEX IF NOT EXISTS ix_equity_ts ON equity(ts);
 """

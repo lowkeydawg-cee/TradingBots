@@ -40,6 +40,7 @@ if [ ! -f .env ]; then
   cp .env.example .env
   read -rp  "Alpaca PAPER API key (starts with PK): " KEY
   read -rsp "Alpaca PAPER secret key: " SECRET; echo
+  read -rp  "ntfy topic for phone alerts (long secret name, Enter to skip): " NTFY
   read -rp  "Telegram bot token (Enter to skip): " TG_TOKEN
   read -rp  "Telegram chat id (Enter to skip): " TG_CHAT
   read -rsp "Dashboard password: " DASH_PW; echo
@@ -47,6 +48,7 @@ if [ ! -f .env ]; then
   set_env BOT_MODE alpaca
   set_env ALPACA_API_KEY "$KEY"
   set_env ALPACA_SECRET_KEY "$SECRET"
+  set_env NTFY_TOPIC "$NTFY"
   set_env TELEGRAM_BOT_TOKEN "$TG_TOKEN"
   set_env TELEGRAM_CHAT_ID "$TG_CHAT"
   set_env DASHBOARD_PASSWORD "$DASH_PW"
@@ -55,7 +57,7 @@ else
   echo "    keeping existing .env"
 fi
 
-echo "==> 3/5 Start the bot and dashboard"
+echo "==> 3/5 Start the bot, the market watcher and the dashboard"
 sudo -u bot docker compose up -d --build
 [ -f blackout.csv ] && sudo -u bot docker compose cp blackout.csv bot:/data/blackout.csv || true
 
@@ -78,4 +80,4 @@ echo
 echo "Done. The bot is running on your Alpaca PAPER account."
 echo "  Dashboard (laptop + phone, after installing Tailscale there): https://${NAME:-<this-server>.ts.net}"
 echo "  Logs:    cd $APP && docker compose logs -f bot"
-echo "  Phone:   send /status to your Telegram bot"
+echo "  Phone:   alerts arrive in the ntfy app (and Telegram, if you set it up)"
