@@ -133,11 +133,20 @@ only from your devices. Set up an SSH key from your PC to the `bot` user first.
 ```yaml
 mcp:
   servers:
-    trading:
+    trading:             # questions: answered straight away
       command: ssh
       args: [bot@<server>.ts.net, "cd TradingBots/pairs-bot && docker compose exec -T bot python mcp_server.py"]
-      confirm: true      # Jarvis asks before pause / resume / stop
+      confirm: false
+      allow_tools: [get_bot_status, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
+    trading_control:     # actions: Jarvis asks you first
+      command: ssh
+      args: [bot@<server>.ts.net, "cd TradingBots/pairs-bot && docker compose exec -T bot python mcp_server.py"]
+      confirm: true
+      allow_tools: [pause, resume, stop_everything]
 ```
+
+Jarvis's `confirm` setting covers a whole server, so the same tool is listed
+twice: once for questions without a confirmation, once for actions with one.
 
 **Bot and Jarvis on the same computer:**
 
@@ -148,8 +157,19 @@ mcp:
       command: C:/Users/<you>/TradingBots/pairs-bot/.venv/Scripts/python.exe
       args: [C:/Users/<you>/TradingBots/pairs-bot/mcp_server.py]
       env: {PAIRS_DB_PATH: C:/Users/<you>/TradingBots/pairs-bot/pairs_bot.db}
+      confirm: false
+      allow_tools: [get_bot_status, get_market_watch, explain, get_recent_trades, get_profit, get_demo_results]
+    trading_control:
+      command: C:/Users/<you>/TradingBots/pairs-bot/.venv/Scripts/python.exe
+      args: [C:/Users/<you>/TradingBots/pairs-bot/mcp_server.py]
+      env: {PAIRS_DB_PATH: C:/Users/<you>/TradingBots/pairs-bot/pairs_bot.db}
       confirm: true
+      allow_tools: [pause, resume, stop_everything]
 ```
+
+This works with Jarvis's default Groq brain (`llm.provider: hybrid`, `GROQ_API_KEY`):
+Groq's `llama-3.3-70b-versatile` supports tool calling, and Jarvis's own MCP
+client was checked against this server (it lists all 9 tools and calls them).
 
 Jarvis then has these tools: `get_bot_status`, `get_market_watch`, `explain`
 (why a pair is graded the way it is), `get_recent_trades`, `get_profit`,
