@@ -134,7 +134,21 @@ then `streamlit run app.py`.
 
 ## Jarvis
 
-`mcp_server.py` lets your Jarvis assistant (or any assistant that speaks MCP,
+**The easy way.** From the pairs-bot folder, with the bot's Python:
+
+```bash
+python connect_jarvis.py --demo                 # bot and Jarvis on the same PC; --demo makes test data if the bot hasn't run yet
+python connect_jarvis.py --ssh bot@pairs-server # bot on your server, Jarvis on your PC
+```
+
+It finds your Jarvis folder (or pass `--jarvis C:/Users/you/Pac`), checks that
+the bot answers the way Jarvis will call it, adds the two entries below to
+Jarvis's `config.yaml` (keeping a backup), and tells you if anything on
+Jarvis's side would stop it seeing the tools. Then restart Jarvis: its startup
+should print `[mcp] trading: 7 tools`. If you don't see that line, Jarvis
+hasn't loaded the bot, and asking it about trading will get a guess instead.
+
+**Doing it by hand.** `mcp_server.py` lets your Jarvis assistant (or any assistant that speaks MCP,
 including Claude Desktop) read and control the bot. Add one of these to
 Jarvis's `config.yaml` under `mcp.servers`.
 
