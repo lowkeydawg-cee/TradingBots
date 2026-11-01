@@ -158,6 +158,7 @@ class Insights:
         self.last_alert: dict[str, float] = {}
         self.briefs_sent: set[tuple[str, str]] = set()  # (date, slot)
         self.pending_changes: list[str] = []            # accumulated between briefs
+        self.mood_at_brief: str | None = None           # mood when the last brief went out
 
     def update(self, opps, closes: pd.DataFrame, ts: float) -> tuple[MarketRead, list[str]]:
         """Returns this scan's read and the alerts to send now."""
@@ -181,7 +182,6 @@ class Insights:
                 changes.append(f"{o.pair} turned STRONG")
         if self.prev is not None:
             if read.mood != self.prev.mood and "unknown" not in (read.mood, self.prev.mood):
-                changes.append(f"mood {self.prev.mood} -> {read.mood}")
                 if read.mood == "stressed":
                     alerts.append(self._once("mood", ts, f"MARKET STRESSED: spread moves are {read.vol_ratio:.1f}x "
                                                          f"normal across {read.pairs} pairs. Signals are less reliable "
@@ -204,8 +204,14 @@ class Insights:
             if key not in self.last_alert:
                 self.last_alert[key] = ts
                 alerts.append(f"BIG MOVE: stocks {read.move:+.1%} today on average. Watch for pairs breaking.")
-        self.pending_changes.extend(changes)
-        read.changes = list(self.pending_changes)
+        for c in changes:                               # a pair flapping between grades is listed once
+            if c not in self.pending_changes:
+                self.pending_changes.append(c)
+        if self.mood_at_brief is None and read.mood != "unknown":
+            self.mood_at_brief = read.mood
+        mood_change = ([f"mood {self.mood_at_brief} -> {read.mood}"]
+                       if self.mood_at_brief not in (None, read.mood) and read.mood != "unknown" else [])
+        read.changes = mood_change + list(self.pending_changes)
         self.prev, self.prev_grades = read, {o.pair: o.grade for o in opps}
         return read, [a for a in alerts if a]
 
@@ -229,3 +235,5 @@ class Insights:
     def mark_sent(self, ts: float, slot: str) -> None:
         self.briefs_sent.add((datetime.fromtimestamp(ts, NY).date().isoformat(), slot))
         self.pending_changes.clear()
+        if self.prev is not None and self.prev.mood != "unknown":
+            self.mood_at_brief = self.prev.mood
