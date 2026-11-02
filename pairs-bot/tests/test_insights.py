@@ -33,7 +33,7 @@ def test_mood_and_read():
     assert r.pairs == 2 and r.cointegrated == 1 and r.move == pytest.approx(0.02)
     text = r.text("open")
     assert "Market brief (open)" in text and "1 of 2 pairs" in text and "not a forecast" in text
-    assert text.index("banks") < text.index("tech")          # most stressed sector first
+    assert text.index("- banks") < text.index("- tech")      # most stressed sector first
 
 
 def test_alerts_fire_once_on_real_changes():

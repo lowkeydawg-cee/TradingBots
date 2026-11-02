@@ -172,3 +172,13 @@ async def test_ntfy_push(monkeypatch):
     assert [r.full_url for r in sent] == ["https://ntfy.sh/pairs-test-123"] * 2
     assert sent[0].get_header("Priority") == "default" and sent[1].get_header("Priority") == "urgent"
     assert sent[1].data == b"[pairs-bot] HALTED: daily loss limit"
+
+
+def test_crypto_signals_are_demo_only(monkeypatch, wcfg):
+    import pandas as pd
+    monkeypatch.setattr(w, "compute_spread_stats", lambda *a, **k: stats(z=2.5))
+    df = pd.DataFrame({"BTCUSD": [1.0] * wcfg.hedge_lookback, "ETHUSD": [1.0] * wcfg.hedge_lookback})
+    o = w.assess(("BTCUSD", "ETHUSD"), "crypto", df, wcfg, GOOD)
+    assert o.grade == "RISKY" and "can't short crypto" in o.flags[0]
+    monkeypatch.setattr(w, "compute_spread_stats", lambda *a, **k: stats(z=1.0))
+    assert w.assess(("BTCUSD", "ETHUSD"), "crypto", df, wcfg, GOOD).grade == "WATCH"

@@ -255,8 +255,10 @@ def build_server():
 
     @server.tool()
     def get_market_brief() -> str:
-        """How the market looks right now: calm or stressed, which sectors move, how many pairs still move
-        together, what changed today, and recent alerts. Descriptive, not a forecast."""
+        """How the markets look right now (US stocks, world stocks, bonds, gold, oil, currencies, crypto):
+        which market has the best conditions for trading now and which are closed, calm or stressed, today's
+        world moves and risk-on/off, how many pairs still move together, what changed, and recent alerts.
+        Use for 'where should I trade', crypto, bitcoin, gold or currency questions. Descriptive, not a forecast."""
         return market_brief()
 
     @server.tool()
