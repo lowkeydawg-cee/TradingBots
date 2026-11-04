@@ -466,6 +466,12 @@ class Watcher:
         if slot:
             await self.notifier.send(text)
             self.insights.mark_sent(now, slot)
+            if slot == "close" and datetime.fromtimestamp(now, NY).weekday() == 4:    # Friday: the week in review
+                from timing import timing_report
+                try:
+                    await self.notifier.send(await asyncio.to_thread(timing_report, self.db.path, 7, None, now))
+                except Exception as exc:                                         # a report must not stop the watcher
+                    log.warning("weekly timing report failed: %s", exc)
 
     async def _record(self, o: Opportunity) -> None:
         await self.db._write(

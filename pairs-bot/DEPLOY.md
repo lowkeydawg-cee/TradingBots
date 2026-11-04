@@ -153,6 +153,23 @@ and ether, and whether that looks risk-on or risk-off. Ask Jarvis "where should
 I trade right now?" or "how's crypto?". Good conditions for pairs trading are
 not a prediction that prices will rise.
 
+**When was it good to trade? (weekly report)** `python timing.py` reads what the
+watcher logged over the last 7 days and ranks the markets, with each one's best
+and weakest hours and best day (in your computer's local time), and lists every
+STRONG signal you could have entered with what its demo trade made or lost
+after costs. Your phone gets it every Friday after the US close, and Jarvis
+reads it when you ask "when was the best time to trade this week?". No week of
+logs yet? `python timing.py --replay` replays the last 7 days of real prices
+through the watcher into a separate `replay.db` (10-20 minutes for every market;
+`--universe crypto` works without Alpaca keys). It describes the past on few
+trades: a hint for where to look, not a forecast.
+
+**Is the data live?** If the watcher hasn't scanned for 2 hours, the brief,
+the market watch and the weekly report start with "NOT LIVE", and with
+"SIMULATED PRICES" when the last scan was the offline demo, so Jarvis can't
+pass old demo numbers off as today's market. Keep `watcher.py --source alpaca`
+running (the `watcher` service on a server does this for you).
+
 Try it on your laptop with simulated prices: `python watcher.py --source sim --fast --scans 300`,
 then `streamlit run app.py`.
 
