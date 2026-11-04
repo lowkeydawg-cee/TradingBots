@@ -10,6 +10,7 @@ below, and its model calls them when you ask about the bot:
     recent_trades    the last closed trades, real paper and demo (shadow)
     profit_summary   P&L today, this week and all time
     demo_results     do STRONG signals beat RISKY and AVOID ones? which hours work best?
+    trend_results    the long-only trend demo beside the pairs demo, market by market
     pause_trading / resume_trading / emergency_stop
 
 Everything is read from ``pairs_bot.db`` through a read-only connection, so it
@@ -294,6 +295,16 @@ def build_server():
             return f"{warn}\n{report}" if warn else report
         except FileNotFoundError as exc:
             return str(exc)
+
+    @server.tool()
+    def get_trend_results() -> str:
+        """The long-only trend demo (for markets like crypto where pairs can't short) beside the pairs demo, market
+        by market: trades, wins and net after costs, and what it holds now. Use for 'trend', 'long only', 'which
+        approach is better'. Demo trades, measured on the past, not a forecast."""
+        from trend import trend_results
+        warn = freshness()
+        report = trend_results(db_path())
+        return f"{warn}\n{report}" if warn else report
 
     @server.tool()
     def explain(pair: str) -> str:

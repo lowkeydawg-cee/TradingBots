@@ -35,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 READ_TOOLS = ["get_bot_status", "get_market_brief", "get_market_watch", "explain", "get_recent_trades",
-              "get_profit", "get_demo_results"]
+              "get_profit", "get_demo_results", "get_timing_report", "get_trend_results"]
 CONTROL_TOOLS = ["pause", "resume", "stop_everything"]
 MARK = "# --- trading bot (added by pairs-bot/connect_jarvis.py) ---"
 
