@@ -296,6 +296,19 @@ def build_server():
             return str(exc)
 
     @server.tool()
+    def get_strategy_comparison() -> str:
+        """Which trading approach is doing best on demo money: the pairs book (STRONG only, STRONG + RISKY) against
+        the buy-only strategies on crypto and gold (trend, dip, breakout, and buy-and-hold as the benchmark).
+        Use for 'which strategy is working', 'compare approaches', 'should we switch'. Past results, not a forecast."""
+        from longonly import comparison_text
+        try:
+            warn = freshness()
+            text = comparison_text(db_path())
+            return f"{warn}\n{text}" if warn else text
+        except FileNotFoundError as exc:
+            return str(exc)
+
+    @server.tool()
     def explain(pair: str) -> str:
         """Explain one pair, e.g. KO/PEP: its grade, statistics, warnings and what the bot did with it lately."""
         return explain_pair(pair)

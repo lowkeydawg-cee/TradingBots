@@ -71,6 +71,7 @@ from config import ConfigError, Settings, load_settings
 from db_logger import DBLogger
 from execution import pair_pnl, plan_pair
 from insights import Insights
+from longonly import LongBook
 from notify import Notifier
 from scanner import ALL_SECTORS, CRYPTO, MARKET_OF, alpaca_crypto
 from strategy import Action, Position, compute_spread_stats, decide
@@ -404,6 +405,7 @@ class Watcher:
         self.blackout = blackout or Blackout(None)
         self.min_prob = min_prob
         self.book = ShadowBook(db, cfg, costs)
+        self.long_book = LongBook(db)           # buy-only strategies on crypto and gold, demo money, to compare
         self._history: dict[str, tuple[float, History]] = {}
         self._last_grade: dict[str, str] = {}
         self.insights = Insights({f"{a}/{b}" for a, b in (cfg.pairs or ())} | set(watched_pairs or ()))
@@ -448,6 +450,9 @@ class Watcher:
                                          f"{opp.prob:.0%} over {opp.hist_trades} trades (shadow trade {change or 'held'})")
             self._last_grade[name] = opp.grade
             out.append(opp)
+        tradable = {s for syms in getattr(self.source, "active_sectors", self.source.sectors).values() for s in syms}
+        for event in await self.long_book.update(closes, tradable):
+            log.info("buy-only demo: %s", event)
         if out:
             await self._insights(out, closes, now)
         return out
@@ -525,6 +530,7 @@ async def amain(argv: list[str] | None = None) -> None:
                       blackout=Blackout(base.blackout_file), min_prob=args.min_prob,
                       watched_pairs={f"{a}/{b}" for a, b in base.all_pairs})
     await watcher.book.load()
+    await watcher.long_book.load()
     log.info("watching %d pairs in %d sectors on %d-minute bars", len(watcher.pairs(every=True)),
              len(source.sectors), args.timeframe)
     scans = 0

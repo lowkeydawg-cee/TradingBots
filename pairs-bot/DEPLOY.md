@@ -164,6 +164,18 @@ through the watcher into a separate `replay.db` (10-20 minutes for every market;
 `--universe crypto` works without Alpaca keys). It describes the past on few
 trades: a hint for where to look, not a forecast.
 
+**Buy-only strategies next to pairs.** Alpaca can't short crypto, so pairs
+trading can't really run there. The watcher also runs four buy-only approaches
+with demo money on BTC, ETH, SOL, LTC, gold (GLD), silver (SLV) and gold miners
+(GDX): **trend** (buy when the 20-bar average is above the 100-bar one, sell
+when it turns or on a trailing stop), **dip** (buy a sharp RSI dip inside an
+uptrend, sell on the bounce, a stop or after a day), **breakout** (buy a new
+one-day high, trailing stop) and **hold** (buy once: the benchmark). Ask Jarvis
+"which strategy is working?" or read the comparison at the end of
+`review/review.md`. To test them on past prices right away:
+`python longonly.py --source alpaca --days 60` (crypto, no keys needed; add
+`--symbols BTCUSD ETHUSD GLD SLV` once Alpaca keys are in `.env`).
+
 **Is the data live?** If the watcher hasn't scanned for 2 hours, the brief,
 the market watch and the weekly report start with "NOT LIVE", and with
 "SIMULATED PRICES" when the last scan was the offline demo, so Jarvis can't

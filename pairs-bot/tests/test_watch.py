@@ -145,7 +145,7 @@ def test_mcp_server_lists_its_tools():
     server = mcp_server.build_server()
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
-    assert {"get_bot_status", "get_market_brief", "get_market_watch", "get_timing_report", "explain", "pause", "resume",
+    assert {"get_bot_status", "get_market_brief", "get_market_watch", "get_timing_report", "get_strategy_comparison", "explain", "pause", "resume",
             "stop_everything"} <= names
 
 
