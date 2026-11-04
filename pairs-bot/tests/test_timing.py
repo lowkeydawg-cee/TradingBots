@@ -75,3 +75,18 @@ def test_replay_source_opens_stocks_only_in_us_hours():
     assert set(src.active_sectors) == {"beverages", "crypto"}
     import asyncio
     assert len(asyncio.run(src.closes(2))) == 2
+
+
+def test_review_lists_every_entry_and_compares_rules(tmp_path):
+    from review import verdict, write_review
+    opps = [(ts(3, 14), "BTCUSD/ETHUSD", "crypto", "STRONG", -2.3), (ts(3, 15), "GLD/SLV", "metals", "RISKY", 2.4)]
+    path = make_db(tmp_path, opps, [("BTCUSD/ETHUSD", ts(3, 14), ts(3, 16), 30.0),
+                                    ("GLD/SLV", ts(3, 15), ts(3, 18), -12.0)])
+    variants = pd.DataFrame([("current", "Crypto", "x", -5.0), ("current", "Gold & metals", "y", -5.0),
+                             ("patient entry", "Crypto", "x", 200.0), ("patient entry", "Gold & metals", "y", 150.0)],
+                            columns=["variant", "market", "pair", "net_pnl"])
+    out = write_review(path, tmp_path / "review", variants, tz=UTC)
+    text = out.read_text()
+    assert "Tue 03 Nov 14:00 | BTCUSD/ETHUSD | Crypto | STRONG" in text and "$+30.00" in text and "$-12.00" in text
+    assert "made $18.00 after costs" in text and "'patient entry' beat the current rules" in text
+    assert (tmp_path / "review" / "trades.csv").exists()

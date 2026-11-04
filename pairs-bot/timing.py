@@ -282,7 +282,7 @@ async def _prefill_history(watcher, closes: pd.DataFrame, now: float) -> None:
 
 
 async def replay(days: int, sectors: dict[str, list[str]], db_path: str, source: str = "alpaca",
-                 timeframe: int = 15, quiet: bool = True) -> str:
+                 timeframe: int = 15, quiet: bool = True, review_dir: str | Path | None = None) -> str:
     """Replay the last ``days`` days into a fresh database and return the report."""
     from backtest import Costs
     from config import load_settings
@@ -322,7 +322,13 @@ async def replay(days: int, sectors: dict[str, list[str]], db_path: str, source:
                                                  t.tz_convert(NY).strftime("%a %d %b %H:%M New York"))
     finally:
         await db.close()
-    return timing_report(db_path, days=days, now=last.timestamp() + 1)
+    report = timing_report(db_path, days=days, now=last.timestamp() + 1)
+    if review_dir:
+        from review import compare_rules, write_review
+        variants = await asyncio.to_thread(compare_rules, stocks, crypto, src.sectors, cfg, start, watcher.costs_for)
+        path = write_review(db_path, review_dir, variants, title=f"Replay review, last {days} days")
+        report += f"\n\nDetailed review (every entry, wins and losses, other rule sets): {path}"
+    return report
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -337,7 +343,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.replay:
         sectors = {k: ALL_SECTORS[k] for k in (args.universe or ALL_SECTORS)}
         db = args.db or str(Path(__file__).with_name("replay.db"))
-        print(asyncio.run(replay(args.days, sectors, db, args.source)))
+        print(asyncio.run(replay(args.days, sectors, db, args.source,
+                                 review_dir=Path(__file__).with_name("review"))))
         print(f"\n(replay saved in {db}; your live logs were not touched)")
     else:
         from mcp_server import db_path
