@@ -317,6 +317,8 @@ async def replay(days: int, sectors: dict[str, list[str]], db_path: str, source:
         for i, t in enumerate(src.steps, 1):
             src.t = t
             await watcher.scan()
+            if i == len(src.steps):
+                await watcher.long_book.close_all(await src.closes(watcher.history_bars))
             if i % 100 == 0:
                 logging.getLogger("timing").info("replayed %d of %d bars (%s)", i, len(src.steps),
                                                  t.tz_convert(NY).strftime("%a %d %b %H:%M New York"))

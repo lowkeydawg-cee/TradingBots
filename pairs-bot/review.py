@@ -255,6 +255,16 @@ def write_review(db_path: str, out_dir: str | Path, variants: pd.DataFrame | Non
         lines += ["", "| rule set | " + " | ".join(piv.columns) + " |", "|---|" + "---|" * len(piv.columns)]
         for name in piv.index:
             lines.append(f"| {name} | " + " | ".join(_money(x) for x in piv.loc[name]) + " |")
+    try:
+        from longonly import comparison_rows
+        rows = comparison_rows(db_path)
+    except Exception:
+        rows = []
+    if any(r[1] for r in rows):
+        lines += ["", "## Pairs against buy-only strategies (same period, demo money)", "",
+                  "| approach | closed trades | won | net after costs |", "|---|---|---|---|"]
+        lines += [f"| {label} | {n} | {w / n:.0%} | {_money(net)} |" if n else f"| {label} | 0 | | |"
+                  for label, n, w, net in rows]
     lines += ["", "Every trade is in trades.csv next to this file."]
     path = out_dir / "review.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

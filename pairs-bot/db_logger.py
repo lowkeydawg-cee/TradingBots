@@ -137,6 +137,22 @@ CREATE TABLE IF NOT EXISTS market_notes (
     text  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_notes_ts ON market_notes(kind, ts);
+
+-- Buy-only strategies (longonly.py) traded with demo money next to the pairs book, to compare approaches
+CREATE TABLE IF NOT EXISTS long_trades (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy    TEXT NOT NULL,        -- trend / dip / breakout / hold
+    symbol      TEXT NOT NULL,
+    market      TEXT,
+    opened_at   REAL NOT NULL,        -- bar time
+    entry       REAL NOT NULL,
+    qty         REAL NOT NULL,
+    entry_note  TEXT,
+    closed_at   REAL, exit REAL,
+    gross_pnl   REAL, costs REAL, net_pnl REAL,
+    exit_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_long_open ON long_trades(strategy, symbol, closed_at);
 CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
 CREATE INDEX IF NOT EXISTS ix_equity_ts ON equity(ts);
 """
