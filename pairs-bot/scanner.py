@@ -52,7 +52,36 @@ UNIVERSES: dict[str, list[str]] = {
     "telecom": ["T", "VZ", "TMUS"],
     "rails": ["UNP", "CSX", "NSC"],
     "chips": ["AMD", "NVDA", "INTC", "AVGO"],
+    # Beyond US companies, through US-listed funds (ETFs) that trade on the same Alpaca account
+    "us_indexes": ["SPY", "QQQ", "DIA", "IWM"],            # S&P 500, Nasdaq, Dow, small caps
+    "world_stocks": ["EFA", "VGK", "EWG", "EWU", "EWJ"],   # developed world, Europe, Germany, UK, Japan
+    "emerging": ["EEM", "VWO", "FXI", "EWZ"],              # emerging markets, China, Brazil
+    "bonds": ["TLT", "IEF", "AGG", "LQD"],                 # long and mid Treasuries, all bonds, corporates
+    "metals": ["GLD", "SLV", "GDX", "GDXJ"],               # gold, silver, gold miners
+    "oil": ["USO", "BNO", "XLE", "XOP"],                   # US and Brent crude, oil companies
+    "currencies": ["UUP", "FXE", "FXB", "FXY"],            # US dollar, euro, pound, yen
 }
+
+# Crypto trades 24/7 on Alpaca (symbols here without the slash: BTCUSD is BTC/USD).
+# Alpaca can't short crypto, so crypto pairs are for watching and demo trades only.
+CRYPTO: dict[str, list[str]] = {
+    "crypto": ["BTCUSD", "ETHUSD", "SOLUSD", "LTCUSD", "BCHUSD", "LINKUSD"],
+}
+CRYPTO_SYMBOLS = {s for v in CRYPTO.values() for s in v}
+ALL_SECTORS: dict[str, list[str]] = {**UNIVERSES, **CRYPTO}
+
+# Which market each sector belongs to, for the "where conditions look best" ranking
+MARKET_OF: dict[str, str] = {
+    **{k: "US stocks" for k in UNIVERSES},
+    "world_stocks": "World stocks", "emerging": "World stocks",
+    "bonds": "Bonds", "metals": "Gold & metals", "oil": "Oil",
+    "currencies": "Currencies", "crypto": "Crypto",
+}
+
+
+def alpaca_crypto(symbol: str) -> str:
+    """BTCUSD -> BTC/USD, the name Alpaca's crypto API uses."""
+    return f"{symbol[:-3]}/{symbol[-3:]}"
 
 
 @dataclass

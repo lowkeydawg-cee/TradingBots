@@ -3,9 +3,17 @@
     python watcher.py --source sim --fast --scans 500     # offline demo
     python watcher.py --source alpaca                      # all day on real prices (keys in .env)
 
-What it does, every bar (15 minutes by default) while the market is open
---------------------------------------------------------------------------
-1. Downloads recent prices for every stock in scanner.UNIVERSES.
+What it watches
+---------------
+US stock sectors, plus US-listed funds for world stocks, bonds, gold and
+silver, oil and currencies (scanner.UNIVERSES), and crypto (scanner.CRYPTO),
+all from the same free Alpaca paper account. Stocks and funds are scanned
+while the US market is open; crypto trades 24/7, so it is scanned at night
+and on weekends too.
+
+What it does, every bar (15 minutes by default)
+------------------------------------------------
+1. Downloads recent prices for every symbol it watches.
 2. For every pair in each sector it computes the live z-score, cointegration,
    half-life and volatility, and looks back over the last ~40 trading days to
    see how this exact rule set did on that pair after costs (the backtester).
@@ -59,12 +67,12 @@ import pandas as pd
 
 from backtest import Costs, run_backtest
 from blackout import Blackout
-from config import Settings, load_settings
+from config import ConfigError, Settings, load_settings
 from db_logger import DBLogger
 from execution import pair_pnl, plan_pair
 from insights import Insights
 from notify import Notifier
-from scanner import UNIVERSES
+from scanner import ALL_SECTORS, CRYPTO, MARKET_OF, alpaca_crypto
 from strategy import Action, Position, compute_spread_stats, decide
 
 log = logging.getLogger("watcher")
@@ -73,6 +81,8 @@ NY = ZoneInfo("America/New_York")
 GRADES = ("STRONG", "RISKY", "AVOID", "WATCH", "QUIET")
 TRADED = ("STRONG", "RISKY", "AVOID")          # grades the shadow book trades
 MIN_HISTORY_TRADES = 5
+# Alpaca crypto: ~0.25% taker fee plus spread per order, no SEC/FINRA fees, no shorting (so no borrow)
+CRYPTO_COSTS = Costs(spread_bps=30.0, sec_fee_rate=0.0, taf_per_share=0.0, taf_max=0.0, borrow_rate_annual=0.0)
 
 
 @dataclass
@@ -153,6 +163,8 @@ def assess(pair: tuple[str, str], sector: str, closes: pd.DataFrame, cfg: Settin
         soft.append(f"volatility spike ({stats.vol_ratio:.1f}x normal)")
     if blackout_reason:
         soft.append(f"event: {blackout_reason}")
+    if sector in CRYPTO and abs(stats.zscore) >= pcfg.entry_z:
+        soft.append("Alpaca can't short crypto: demo only")
     if hist.trades < MIN_HISTORY_TRADES:
         soft.append(f"only {hist.trades} past trades")
     elif hist.avg_net is not None and hist.avg_net <= 0:
@@ -206,11 +218,13 @@ class ShadowBook:
         for i, pair, d, qa, qb, ea, eb, at in rows:
             self.open[pair] = Shadow(i, pair, Position(d), int(qa), int(qb), ea, eb, at, 0.0)
 
-    def _order_costs(self, qty_a: int, qty_b: int, pa: float, pb: float, sides: tuple[str, str]) -> float:
-        return sum(sum(self.costs.order_cost(q, p, s)) for q, p, s in ((qty_a, pa, sides[0]), (qty_b, pb, sides[1])))
+    def _order_costs(self, qty_a: int, qty_b: int, pa: float, pb: float, sides: tuple[str, str],
+                     costs: Costs) -> float:
+        return sum(sum(costs.order_cost(q, p, s)) for q, p, s in ((qty_a, pa, sides[0]), (qty_b, pb, sides[1])))
 
-    async def update(self, opp: Opportunity, stats_closes: pd.DataFrame) -> str | None:
+    async def update(self, opp: Opportunity, stats_closes: pd.DataFrame, costs: Costs | None = None) -> str | None:
         """Advance this pair's shadow position by one bar. Returns "opened"/"closed"/None."""
+        costs = costs or self.costs
         a, b = opp.pair.split("/")
         pcfg = self.cfg.for_pair(a, b)
         sh = self.open.get(opp.pair)
@@ -223,9 +237,9 @@ class ShadowBook:
                 return None
             long_a = sh.direction is Position.LONG_SPREAD
             exit_costs = self._order_costs(sh.qty_a, sh.qty_b, stats.price_a, stats.price_b,
-                                           ("sell", "buy") if long_a else ("buy", "sell"))
+                                           ("sell", "buy") if long_a else ("buy", "sell"), costs)
             short_value = sh.qty_b * sh.entry_b if long_a else sh.qty_a * sh.entry_a
-            borrow = self.costs.borrow_cost(short_value, stats.bar_time - sh.opened_at)
+            borrow = costs.borrow_cost(short_value, stats.bar_time - sh.opened_at)
             gross = pair_pnl(sh.direction, sh.qty_a, sh.qty_b, sh.entry_a, sh.entry_b, stats.price_a, stats.price_b)
             total_costs = sh.costs + exit_costs + borrow
             await self.db._write(
@@ -245,7 +259,7 @@ class ShadowBook:
             plan = plan_pair(direction, st, pcfg)
         except ValueError:
             return None
-        costs = self._order_costs(plan.qty_a, plan.qty_b, opp.price_a, opp.price_b, (plan.side_a, plan.side_b))
+        entry_costs = self._order_costs(plan.qty_a, plan.qty_b, opp.price_a, opp.price_b, (plan.side_a, plan.side_b), costs)
         hour = datetime.fromtimestamp(opp.bar_time, NY).hour
         trade_id = await self.db._write(
             "INSERT INTO shadow_trades (pair, grade, flags, direction, opened_at, entry_hour, entry_z, prob, "
@@ -253,7 +267,7 @@ class ShadowBook:
             (opp.pair, opp.grade, "; ".join(opp.flags), str(direction), opp.bar_time, hour, opp.zscore,
              opp.prob, plan.qty_a, plan.qty_b, opp.price_a, opp.price_b))
         self.open[opp.pair] = Shadow(trade_id, opp.pair, direction, plan.qty_a, plan.qty_b,
-                                     opp.price_a, opp.price_b, opp.bar_time, costs)
+                                     opp.price_a, opp.price_b, opp.bar_time, entry_costs)
         return "opened"
 
 
@@ -273,6 +287,7 @@ class SimSource:
         for m in self.markets:
             m.warm_up(warm)
         self.sectors = {"sim": ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH"]}
+        self.active_sectors, self.closed_markets = self.sectors, []
 
     async def market_open(self) -> bool:
         return True
@@ -287,32 +302,86 @@ class SimSource:
 
 
 class AlpacaSource:
+    """Stocks and funds from Alpaca's stock feed (US hours), crypto from its crypto feed (24/7)."""
+
     def __init__(self, cfg: Settings, sectors: dict[str, list[str]]) -> None:
         from alpaca.data.enums import DataFeed
-        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.historical import CryptoHistoricalDataClient, StockHistoricalDataClient
         from alpaca.trading.client import TradingClient
 
         self.cfg, self.sectors = cfg, sectors
-        self._data = StockHistoricalDataClient(cfg.api_key, cfg.secret_key)
-        self._trading = TradingClient(cfg.api_key, cfg.secret_key, paper=True)
+        self.stock_sectors = {k: v for k, v in sectors.items() if k not in CRYPTO}
+        self.crypto_sectors = {k: v for k, v in sectors.items() if k in CRYPTO}
+        if self.stock_sectors:                         # stock prices and the market clock need keys
+            self._data = StockHistoricalDataClient(cfg.api_key, cfg.secret_key)
+            self._trading = TradingClient(cfg.api_key, cfg.secret_key, paper=True)
+        keys = (cfg.api_key, cfg.secret_key) if cfg.api_key and cfg.secret_key else (None, None)
+        self._crypto = CryptoHistoricalDataClient(*keys)  # crypto prices work without keys
         self._feed = DataFeed.IEX if cfg.data_feed == "iex" else DataFeed.SIP
+        self.stocks_open = False
+        self._stock_cache: pd.DataFrame | None = None     # last session's prices while the US market is closed
+
+    @property
+    def active_sectors(self) -> dict[str, list[str]]:
+        """Sectors trading right now: crypto always, stocks and funds only while the US market is open."""
+        return {**(self.stock_sectors if self.stocks_open else {}), **self.crypto_sectors}
+
+    @property
+    def closed_markets(self) -> list[str]:
+        if self.stocks_open:
+            return []
+        return sorted({MARKET_OF.get(k, k) for k in self.stock_sectors})
 
     async def market_open(self) -> bool:
-        clock = await asyncio.to_thread(self._trading.get_clock)
-        return bool(clock.is_open)
+        if self.stock_sectors:
+            clock = await asyncio.to_thread(self._trading.get_clock)
+            self.stocks_open = bool(clock.is_open)
+        return self.stocks_open or bool(self.crypto_sectors)
 
-    def _fetch(self, bars: int) -> pd.DataFrame:
+    def _fetch_stocks(self, bars: int) -> pd.DataFrame:
         from alpaca.data.enums import Adjustment
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
         days = math.ceil(bars * self.cfg.timeframe_minutes / 390) + 1
         start = datetime.now(timezone.utc) - timedelta(days=days * 7 // 5 + 5)
-        symbols = sorted({s for v in self.sectors.values() for s in v})
+        symbols = sorted({s for v in self.stock_sectors.values() for s in v})
         req = StockBarsRequest(symbol_or_symbols=symbols, start=start, adjustment=Adjustment.ALL, feed=self._feed,
                                timeframe=TimeFrame(self.cfg.timeframe_minutes, TimeFrameUnit.Minute))
         df = self._data.get_stock_bars(req).df
         return df["close"].unstack(level="symbol").sort_index().tail(bars) if not df.empty else pd.DataFrame()
+
+    def _fetch_crypto(self, bars: int) -> pd.DataFrame:
+        from alpaca.data.requests import CryptoBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+        days = math.ceil(bars * self.cfg.timeframe_minutes / 1440) + 2
+        symbols = sorted({alpaca_crypto(s) for v in self.crypto_sectors.values() for s in v})
+        req = CryptoBarsRequest(symbol_or_symbols=symbols, start=datetime.now(timezone.utc) - timedelta(days=days),
+                                timeframe=TimeFrame(self.cfg.timeframe_minutes, TimeFrameUnit.Minute))
+        df = self._crypto.get_crypto_bars(req).df
+        if df.empty:
+            return pd.DataFrame()
+        closes = df["close"].unstack(level="symbol").sort_index().tail(bars)
+        return closes.rename(columns=lambda c: c.replace("/", ""))
+
+    def _fetch(self, bars: int) -> pd.DataFrame:
+        frames = []
+        if self.stock_sectors:
+            if self.stocks_open or self._stock_cache is None:
+                try:
+                    self._stock_cache = self._fetch_stocks(bars)
+                except Exception as exc:          # one feed failing must not stop the other
+                    log.warning("stock prices unavailable: %s", exc)
+            if self._stock_cache is not None:
+                frames.append(self._stock_cache)
+        if self.crypto_sectors:
+            try:
+                frames.append(self._fetch_crypto(bars))
+            except Exception as exc:
+                log.warning("crypto prices unavailable: %s", exc)
+        frames = [f for f in frames if not f.empty]
+        return pd.concat(frames, axis=1).sort_index() if frames else pd.DataFrame()
 
     async def closes(self, bars: int) -> pd.DataFrame:
         return await asyncio.to_thread(self._fetch, bars)
@@ -340,9 +409,14 @@ class Watcher:
         self.insights = Insights({f"{a}/{b}" for a, b in (cfg.pairs or ())} | set(watched_pairs or ()))
         self.last_read = None
 
-    def pairs(self) -> list[tuple[tuple[str, str], str]]:
-        return [((a, b), sector) for sector, syms in self.source.sectors.items()
+    def pairs(self, every: bool = False) -> list[tuple[tuple[str, str], str]]:
+        """Pairs to scan now (only markets that are open), or every watched pair."""
+        sectors = self.source.sectors if every else getattr(self.source, "active_sectors", self.source.sectors)
+        return [((a, b), sector) for sector, syms in sectors.items()
                 for a, b in itertools.combinations(syms, 2)]
+
+    def costs_for(self, sector: str) -> Costs:
+        return CRYPTO_COSTS if sector in CRYPTO else self.costs
 
     async def scan(self) -> list[Opportunity]:
         closes = await self.source.closes(self.history_bars)
@@ -357,7 +431,8 @@ class Watcher:
             name = f"{a}/{b}"
             cached = self._history.get(name)
             if cached is None or now - cached[0] >= self.refresh_seconds:
-                hist = await asyncio.to_thread(history_of, df, self.cfg.for_pair(a, b), self.costs, self.all_hours)
+                hist = await asyncio.to_thread(history_of, df, self.cfg.for_pair(a, b), self.costs_for(sector),
+                                               self.all_hours or sector in CRYPTO)
                 self._history[name] = (now, hist)
             hist = self._history[name][1]
             day = datetime.fromtimestamp(df.index[-1].timestamp(), NY).date()
@@ -367,7 +442,7 @@ class Watcher:
                 log.debug("%s skipped: %s", name, exc)
                 continue
             await self._record(opp)
-            change = await self.book.update(opp, df)
+            change = await self.book.update(opp, df, self.costs_for(sector))
             if opp.grade == "STRONG" and self._last_grade.get(name) != "STRONG":
                 await self.notifier.send(f"STRONG {name} {opp.side} z={opp.zscore:+.2f}, recent win rate "
                                          f"{opp.prob:.0%} over {opp.hist_trades} trades (shadow trade {change or 'held'})")
@@ -378,7 +453,7 @@ class Watcher:
         return out
 
     async def _insights(self, opps: list[Opportunity], closes: pd.DataFrame, now: float) -> None:
-        read, alerts = self.insights.update(opps, closes, now)
+        read, alerts = self.insights.update(opps, closes, now, closed=getattr(self.source, "closed_markets", []))
         self.last_read = read
         slot = self.insights.brief_due(now)
         text = read.text(slot or "")
@@ -391,6 +466,12 @@ class Watcher:
         if slot:
             await self.notifier.send(text)
             self.insights.mark_sent(now, slot)
+            if slot == "close" and datetime.fromtimestamp(now, NY).weekday() == 4:    # Friday: the week in review
+                from timing import timing_report
+                try:
+                    await self.notifier.send(await asyncio.to_thread(timing_report, self.db.path, 7, None, now))
+                except Exception as exc:                                         # a report must not stop the watcher
+                    log.warning("weekly timing report failed: %s", exc)
 
     async def _record(self, o: Opportunity) -> None:
         await self.db._write(
@@ -414,7 +495,8 @@ def summarize(opps: list[Opportunity]) -> str:
 async def amain(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="All-day market watcher with demo-money shadow trades")
     ap.add_argument("--source", choices=("sim", "alpaca"), default="sim")
-    ap.add_argument("--universe", nargs="+", choices=sorted(UNIVERSES), help="sectors to watch (default: all)")
+    ap.add_argument("--universe", nargs="+", choices=sorted(ALL_SECTORS),
+                    help="sectors to watch (default: all, including crypto and world funds)")
     ap.add_argument("--timeframe", type=int, default=15, help="bar size in minutes (default 15)")
     ap.add_argument("--scans", type=int, help="stop after N scans")
     ap.add_argument("--fast", action="store_true", help="sim only: no waiting between scans")
@@ -423,9 +505,14 @@ async def amain(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s: %(message)s")
 
-    base = load_settings(mode="alpaca" if args.source == "alpaca" else "sim")
+    sectors = {k: ALL_SECTORS[k] for k in (args.universe or ALL_SECTORS)}
+    crypto_only = set(sectors) <= set(CRYPTO)          # Alpaca's crypto prices need no keys
+    try:
+        base = load_settings(mode="alpaca" if args.source == "alpaca" and not crypto_only else "sim")
+    except ConfigError as exc:
+        raise SystemExit(f"{exc}\nStocks and funds need Alpaca paper keys in .env. Without keys you can "
+                         "still watch crypto: python watcher.py --source alpaca --universe crypto")
     cfg = watch_settings(base, args.timeframe)
-    sectors = {k: UNIVERSES[k] for k in (args.universe or UNIVERSES)}
     if args.source == "sim":
         source, refresh, all_hours = SimSource(warm=cfg.hedge_lookback * 4), 200 * args.timeframe * 60, True
     else:
@@ -438,7 +525,8 @@ async def amain(argv: list[str] | None = None) -> None:
                       blackout=Blackout(base.blackout_file), min_prob=args.min_prob,
                       watched_pairs={f"{a}/{b}" for a, b in base.all_pairs})
     await watcher.book.load()
-    log.info("watching %d pairs on %d-minute bars", len(watcher.pairs()), args.timeframe)
+    log.info("watching %d pairs in %d sectors on %d-minute bars", len(watcher.pairs(every=True)),
+             len(source.sectors), args.timeframe)
     scans = 0
     try:
         while args.scans is None or scans < args.scans:

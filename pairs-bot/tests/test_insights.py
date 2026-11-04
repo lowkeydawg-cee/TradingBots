@@ -33,7 +33,7 @@ def test_mood_and_read():
     assert r.pairs == 2 and r.cointegrated == 1 and r.move == pytest.approx(0.02)
     text = r.text("open")
     assert "Market brief (open)" in text and "1 of 2 pairs" in text and "not a forecast" in text
-    assert text.index("banks") < text.index("tech")          # most stressed sector first
+    assert text.index("- banks") < text.index("- tech")      # most stressed sector first
 
 
 def test_alerts_fire_once_on_real_changes():
@@ -100,3 +100,16 @@ async def test_telegram_market_command(make_bot):
         assert "/market" in await tg.handle("/help")
     finally:
         await bot.db.close()
+
+
+def test_brief_lists_a_flapping_mood_once():
+    ins = Insights()
+    calm, normal = [opp("AAA/BBB", "WATCH", vol=0.5)], [opp("AAA/BBB", "WATCH", vol=1.0)]
+    for i, o in enumerate([calm, normal, calm, normal, calm, normal]):
+        read, _ = ins.update(o, closes(), ny(3, 10, i))
+    assert [c for c in read.changes if c.startswith("mood")] == ["mood calm -> normal"]
+    ins.mark_sent(ny(3, 10, 6), "open")
+    read, _ = ins.update(calm, closes(), ny(3, 10, 7))
+    assert [c for c in read.changes if c.startswith("mood")] == ["mood normal -> calm"]
+    read, _ = ins.update(normal, closes(), ny(3, 10, 8))
+    assert not [c for c in read.changes if c.startswith("mood")]        # back where the last brief left it

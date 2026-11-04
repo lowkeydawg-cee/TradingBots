@@ -94,6 +94,26 @@ def bot_status(path: str | None = None) -> str:
     return " ".join(lines)
 
 
+STALE_AFTER = 2 * 3600       # seconds without a scan before the watcher's numbers count as old
+
+
+def freshness(path: str | None = None) -> str:
+    """A warning line when the watcher's data is old or simulated, so nobody reads it as the live market."""
+    last = _rows("SELECT MAX(ts) FROM opportunities", (), path)
+    last_ts = last[0][0] if last else None
+    if not last_ts:
+        return ""
+    sectors = {r[0] for r in _rows("SELECT DISTINCT sector FROM opportunities WHERE ts >= ?", (last_ts - 600,), path)}
+    warn = []
+    if sectors and sectors <= {"sim"}:
+        warn.append("SIMULATED PRICES: this comes from the offline demo (watcher.py --source sim), not the real market.")
+    if time.time() - last_ts > STALE_AFTER:
+        warn.append(f"NOT LIVE: the watcher last scanned {_ago(last_ts)} and isn't running now, so this is old. "
+                    "Start it with: python watcher.py --source alpaca (or add --universe crypto if there are no "
+                    "Alpaca keys yet).")
+    return "\n".join(warn)
+
+
 def market_watch(limit: int = 8, path: str | None = None) -> str:
     rows = _rows(
         "SELECT o.grade, o.pair, o.side, o.zscore, o.prob, o.hist_trades, o.flags, o.bar_time FROM opportunities o "
@@ -102,7 +122,7 @@ def market_watch(limit: int = 8, path: str | None = None) -> str:
         (int(limit),), path)
     if not rows:
         return "The market watcher has nothing to report. It may not be running: start it with python watcher.py."
-    out = [f"Market watch, updated {_ago(max(r[7] for r in rows))}:"]
+    out = [w for w in [freshness(path)] if w] + [f"Market watch, updated {_ago(max(r[7] for r in rows))}:"]
     for grade, pair, side, z, prob, n, flags, _ in rows:
         line = f"{grade} {pair}: z {z:+.2f}, recent win rate {prob:.0%} over {n} trades"
         line += f", signal {side}" if side else ""
@@ -119,7 +139,7 @@ def market_brief(path: str | None = None) -> str:
     ts, text = brief[0]
     alerts = _rows("SELECT ts, text FROM market_notes WHERE kind = 'alert' AND ts >= ? ORDER BY id DESC LIMIT 6",
                    (ts - 86_400,), path)
-    out = [f"(written {_ago(ts)})", text]
+    out = [w for w in [freshness(path)] if w] + [f"(written {_ago(ts)})", text]
     if alerts:
         out.append("Alerts in the last day:")
         out += [f"- {_ago(t)}: {a}" for t, a in alerts]
@@ -255,9 +275,25 @@ def build_server():
 
     @server.tool()
     def get_market_brief() -> str:
-        """How the market looks right now: calm or stressed, which sectors move, how many pairs still move
-        together, what changed today, and recent alerts. Descriptive, not a forecast."""
+        """How the markets look right now (US stocks, world stocks, bonds, gold, oil, currencies, crypto):
+        which market has the best conditions for trading now and which are closed, calm or stressed, today's
+        world moves and risk-on/off, how many pairs still move together, what changed, and recent alerts.
+        Use for 'where should I trade', crypto, bitcoin, gold or currency questions. Descriptive, not a forecast."""
         return market_brief()
+
+    @server.tool()
+    def get_timing_report(days: int = 7) -> str:
+        """When each market (US stocks, world stocks, bonds, gold, oil, currencies, crypto) was good to trade over
+        the last days: its best hours and days in local time, the STRONG entries you could have taken and what
+        their demo trades made after costs. Use for 'when was the best time to trade', 'weekly report',
+        'when could I have entered'. Measured on the past, not a forecast."""
+        from timing import timing_report
+        try:
+            warn = freshness()
+            report = timing_report(db_path(), days=max(1, min(int(days), 60)))
+            return f"{warn}\n{report}" if warn else report
+        except FileNotFoundError as exc:
+            return str(exc)
 
     @server.tool()
     def explain(pair: str) -> str:

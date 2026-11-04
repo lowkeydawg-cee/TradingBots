@@ -129,6 +129,47 @@ alerts sit at the top of the dashboard's Market watch section, and Jarvis reads
 them when you ask "how does the market look?". The brief describes what prices
 are doing now; it is not a forecast.
 
+**Which markets.** Besides the US stock sectors it watches, through US-listed
+funds on the same free Alpaca paper account: US indexes (SPY, QQQ, DIA, IWM),
+world stocks (EFA, VGK, EWG, EWU, EWJ), emerging markets (EEM, VWO, FXI, EWZ),
+bonds (TLT, IEF, AGG, LQD), gold and silver (GLD, SLV, GDX, GDXJ), oil (USO,
+BNO, XLE, XOP) and currencies (UUP dollar, FXE euro, FXB pound, FXY yen). It
+also watches crypto (BTC, ETH, SOL, LTC, BCH, LINK against USD), which trades
+24/7, so the watcher keeps scanning crypto at night and on weekends while the
+US market is closed. Alpaca can't short crypto, so crypto signals are graded at
+most RISKY and traded with demo money only; crypto demo trades are charged
+about 0.3% per order. Real forex pairs (EUR/USD around the clock) would need
+another data provider such as an OANDA demo account; the currency funds cover
+the US session for now. Pick markets with `--universe`, e.g.
+`python watcher.py --source alpaca --universe crypto metals currencies`.
+
+**Where conditions look best now.** Each brief ranks the markets by how well
+they suit this strategy today: how many of their pairs still move together,
+whether moves are calm or stressed, and how many clean signals there are
+("Best now: 1. Crypto good (10/15 pairs healthy, normal, 1 strong signal); 2.
+Bonds ..."), and says which markets are closed. A "World" line gives today's
+move in US and world stocks, bonds, gold, oil, the dollar, euro, yen, bitcoin
+and ether, and whether that looks risk-on or risk-off. Ask Jarvis "where should
+I trade right now?" or "how's crypto?". Good conditions for pairs trading are
+not a prediction that prices will rise.
+
+**When was it good to trade? (weekly report)** `python timing.py` reads what the
+watcher logged over the last 7 days and ranks the markets, with each one's best
+and weakest hours and best day (in your computer's local time), and lists every
+STRONG signal you could have entered with what its demo trade made or lost
+after costs. Your phone gets it every Friday after the US close, and Jarvis
+reads it when you ask "when was the best time to trade this week?". No week of
+logs yet? `python timing.py --replay` replays the last 7 days of real prices
+through the watcher into a separate `replay.db` (10-20 minutes for every market;
+`--universe crypto` works without Alpaca keys). It describes the past on few
+trades: a hint for where to look, not a forecast.
+
+**Is the data live?** If the watcher hasn't scanned for 2 hours, the brief,
+the market watch and the weekly report start with "NOT LIVE", and with
+"SIMULATED PRICES" when the last scan was the offline demo, so Jarvis can't
+pass old demo numbers off as today's market. Keep `watcher.py --source alpaca`
+running (the `watcher` service on a server does this for you).
+
 Try it on your laptop with simulated prices: `python watcher.py --source sim --fast --scans 300`,
 then `streamlit run app.py`.
 
