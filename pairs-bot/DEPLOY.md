@@ -176,6 +176,14 @@ one-day high, trailing stop) and **hold** (buy once: the benchmark). Ask Jarvis
 `python longonly.py --source alpaca --days 60` (crypto, no keys needed; add
 `--symbols BTCUSD ETHUSD GLD SLV` once Alpaca keys are in `.env`).
 
+**The Approaches page.** `streamlit run app.py`, then pick **Approaches** in
+the sidebar. It puts every demo approach on one page: a one-line verdict
+(who's ahead, and whether there are enough trades to trust it), a scoreboard
+(net after costs, win rate, profit factor, worst drawdown), demo money over
+time, and tabs for results by market, the best times to trade, the pairs
+detail, the last replay review, every trade, and how each approach works.
+Switch between the live watcher and the last replay at the top.
+
 **Is the data live?** If the watcher hasn't scanned for 2 hours, the brief,
 the market watch and the weekly report start with "NOT LIVE", and with
 "SIMULATED PRICES" when the last scan was the offline demo, so Jarvis can't
