@@ -154,6 +154,28 @@ CREATE TABLE IF NOT EXISTS long_trades (
     last_price  REAL, last_ts REAL    -- newest price while open, for its live value
 );
 CREATE INDEX IF NOT EXISTS ix_long_open ON long_trades(strategy, symbol, closed_at);
+
+-- Why each buy-only strategy did (or didn't) trade, one row per strategy and symbol on every closed 4-hour bar
+CREATE TABLE IF NOT EXISTS long_decisions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts        REAL NOT NULL,          -- the 4-hour bar's close time
+    strategy  TEXT NOT NULL,
+    symbol    TEXT NOT NULL,
+    action    TEXT NOT NULL,          -- buy / sell / wait / refused / hold
+    reason    TEXT,
+    price     REAL,
+    qty       REAL,                   -- what was bought or sold (0 when it waited or was refused)
+    state     TEXT                    -- the strategy's risk state then: normal / caution / defense / stopped
+);
+CREATE INDEX IF NOT EXISTS ix_long_decisions ON long_decisions(ts, strategy, symbol);
+
+-- Each buy-only strategy's demo account: its value, high point and risk state (governance.py)
+CREATE TABLE IF NOT EXISTS long_sleeves (
+    strategy   TEXT PRIMARY KEY,
+    value      REAL, peak REAL, drawdown REAL,
+    state      TEXT, stopped INTEGER DEFAULT 0,
+    updated_at REAL
+);
 CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
 CREATE INDEX IF NOT EXISTS ix_equity_ts ON equity(ts);
 """

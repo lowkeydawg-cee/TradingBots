@@ -65,7 +65,33 @@ def test_page_renders(tmp_path, monkeypatch):
     assert not at.exception
     assert any("Trend is ahead" in m.value for m in at.markdown)
     assert {m.label for m in at.metric} >= {"Trend", "Hold", "Pairs (STRONG)"}
-    assert [t.label for t in at.tabs][:2] == ["By market", "When to trade"]
+    assert [t.label for t in at.tabs][:3] == ["Why it did (or didn't) trade", "Validation", "By market"]
+
+
+def test_page_shows_risk_state_and_why_it_did_nothing(tmp_path, monkeypatch):
+    db = str(tmp_path / "w.db")
+    make_db(db)
+    c = sqlite3.connect(db)
+    c.execute("INSERT INTO long_sleeves (strategy, value, peak, drawdown, state, stopped, updated_at) "
+              "VALUES ('trend', 9300, 10000, 0.07, 'caution', 0, 5000)")
+    c.executemany("INSERT INTO long_decisions (ts, strategy, symbol, action, reason, price, qty, state) "
+                  "VALUES (?,?,?,?,?,?,?,?)",
+                  [(4000, "trend", "BTCUSD", "buy", "uptrend; risk 1% of the sleeve", 100, 3, "normal"),
+                   (5000, "trend", "BTCUSD", "wait", "waiting: market not rising (down)", 90, 0, "caution"),
+                   (5000, "dip", "ETHUSD", "refused", "dip, but refused: sleeve is in defense", 50, 0, "defense")])
+    c.commit()
+    c.close()
+    last = A.latest_decisions(db).set_index("strategy")
+    assert last.loc["trend", "action"] == "wait" and "not rising" in last.loc["trend", "reason"]
+    assert list(A.recent_actions(db)["action"]) == ["refused", "buy"]
+    monkeypatch.setenv("PAIRS_DB_PATH", db)
+    monkeypatch.setenv("BOT_MODE", "sim")
+    st.cache_resource.clear()
+    at = AppTest.from_file(PAGE, default_timeout=60).run()
+    assert not at.exception
+    assert any("Trend" in m.label and m.value == "$9,300" for m in at.metric)
+    assert any(s.value == "Why it hasn't traded yet" for s in at.subheader)
+    assert any("not rising" in str(df.value) for df in at.dataframe)
 
 
 def test_page_explains_the_approaches_before_any_trade(tmp_path, monkeypatch):

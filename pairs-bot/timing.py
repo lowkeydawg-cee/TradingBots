@@ -314,6 +314,8 @@ async def replay(days: int, sectors: dict[str, list[str]], db_path: str, source:
         if src.steps:
             src.t = src.steps[0]
             await _prefill_history(watcher, await src.closes(watcher.history_bars), src.t.timestamp())
+            from longonly import prime_bars
+            watcher.long_book.prime(await src.closes(prime_bars(timeframe)))
         for i, t in enumerate(src.steps, 1):
             src.t = t
             await watcher.scan()
