@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from approaches import ABOUT, MIN_TRADES, by_market, equity_curves, load_trades, money, scoreboard, verdict
+from approaches import COMPARE, COMPARE_COLUMNS, MIN_TRADES, by_market, equity_curves, load_trades, money, scoreboard, verdict
 from config import ConfigError, load_settings
 
 st.set_page_config(page_title="Approaches", page_icon="🧭", layout="wide")
@@ -50,6 +50,18 @@ st.title("🧭 Approaches")
 st.caption("Every strategy the bot tries with demo money, scored the same way after costs. "
            "Use it to decide which approach is worth keeping. No real orders are placed by any of these.")
 
+# ---------------------------------------------------------------------------
+# How they differ: always shown, even before any trade
+# ---------------------------------------------------------------------------
+st.subheader("How the approaches differ")
+st.caption("Pairs bets on two prices coming back together. The other four only buy, so they can trade crypto and "
+           "gold for real. Hold does nothing clever: it's the yardstick the others have to beat.")
+st.table(pd.DataFrame(COMPARE, columns=COMPARE_COLUMNS).set_index("Approach"))
+st.caption("Every approach pays the same trading costs (about 0.3% per crypto order), so one that trades a lot "
+           "needs bigger wins to come out ahead.")
+
+st.divider()
+st.subheader("How they've done")
 if not available:
     st.info("No results yet. Start the watcher (`python watcher.py --source alpaca --universe crypto`) and leave it "
             "running, or replay the last week with `python timing.py --replay`.")
@@ -85,7 +97,7 @@ if board.empty:
 # ---------------------------------------------------------------------------
 # Scoreboard
 # ---------------------------------------------------------------------------
-st.subheader("Scoreboard")
+st.markdown("**Scoreboard**")
 cards = board.head(6)
 for col, (_, r) in zip(st.columns(len(cards)), cards.iterrows()):
     with col.container(border=True):
@@ -123,8 +135,8 @@ if not curves.empty:
 # Analysis
 # ---------------------------------------------------------------------------
 st.subheader("Analysis")
-t_market, t_when, t_pairs, t_replay, t_log, t_how = st.tabs(
-    ["By market", "When to trade", "Pairs detail", "Replay review", "Trade log", "How each works"])
+t_market, t_when, t_pairs, t_replay, t_log = st.tabs(
+    ["By market", "When to trade", "Pairs detail", "Replay review", "Trade log"])
 
 with t_market:
     m = by_market(trades)
@@ -178,10 +190,3 @@ with t_log:
                  .sort_values("opened", ascending=False).round({"net_pnl": 2, "costs": 2})
                  .rename(columns={"net_pnl": "net $", "costs": "costs $"}),
                  hide_index=True, width="stretch")
-
-with t_how:
-    for name, text in ABOUT.items():
-        st.markdown(f"**{name}**: {text}")
-    st.caption("Pairs trades both legs and works on US stocks for real; on crypto it's demo only, because Alpaca "
-               "can't short crypto. Buy-only strategies can run for real on crypto and gold. Every result here "
-               "includes trading costs (about 0.3% per crypto order).")
