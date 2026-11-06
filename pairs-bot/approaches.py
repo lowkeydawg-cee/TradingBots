@@ -42,11 +42,20 @@ COMPARE = (
      "Price falls 3 four-hour swings from its high (trailing stop)",
      "Strong news-driven runs", "False breakouts that reverse straight away",
      "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+    ("Trend (4h, gated)", "The same as Trend, trading far less",
+     "Trend's rule on closed 4-hour bars, only when the day closed above its 50-day average",
+     "Trend's exits; selling is never blocked", "Long moves up, with few false starts",
+     "Fast reversals, and it misses the first part of a rally", "Crypto (demo)", "Yes (buy only)"),
+    ("Breakout (4h, gated)", "The same as Breakout, trading far less",
+     "Breakout's rule on closed 4-hour bars, only when the day closed above its 50-day average",
+     "Breakout's trailing stop; selling is never blocked", "Strong runs in a rising market",
+     "False breakouts that reverse", "Crypto (demo)", "Yes (buy only)"),
     ("Hold", "Nothing: it's the yardstick", "At the start", "Never (marked at the last price at the end of a replay)",
      "Markets that go up", "Markets that go down", "Crypto, gold, silver, gold miners", "Yes (buy only)"),
 )
 
-NAMES = {"trend": "Trend", "dip": "Dip", "breakout": "Breakout", "hold": "Hold"}
+NAMES = {"trend": "Trend", "dip": "Dip", "breakout": "Breakout", "hold": "Hold",
+         "trend4h": "Trend (4h, gated)", "breakout4h": "Breakout (4h, gated)"}
 
 
 def money(x: float, decimals: int = 2) -> str:

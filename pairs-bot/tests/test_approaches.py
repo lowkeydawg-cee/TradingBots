@@ -76,7 +76,7 @@ def test_page_explains_the_approaches_before_any_trade(tmp_path, monkeypatch):
     at = AppTest.from_file(PAGE, default_timeout=60).run()
     assert not at.exception
     table = at.table[0].value
-    assert list(table.index) == ["Pairs", "Trend", "Dip", "Breakout", "Hold"]
+    assert list(table.index) == ["Pairs", "Trend", "Dip", "Breakout", "Trend (4h, gated)", "Breakout (4h, gated)", "Hold"]
     assert "Real orders on Alpaca" in table.columns
     assert any("No results yet" in i.value for i in at.info)
 
