@@ -66,3 +66,15 @@ def test_page_renders(tmp_path, monkeypatch):
     assert any("Trend is ahead" in m.value for m in at.markdown)
     assert {m.label for m in at.metric} >= {"Trend", "Hold", "Pairs (STRONG)"}
     assert [t.label for t in at.tabs][:2] == ["By market", "When to trade"]
+
+
+def test_page_explains_the_approaches_before_any_trade(tmp_path, monkeypatch):
+    monkeypatch.setenv("PAIRS_DB_PATH", str(tmp_path / "none.db"))
+    monkeypatch.setenv("BOT_MODE", "sim")
+    st.cache_resource.clear()
+    at = AppTest.from_file(PAGE, default_timeout=60).run()
+    assert not at.exception
+    table = at.table[0].value
+    assert list(table.index) == ["Pairs", "Trend", "Dip", "Breakout", "Hold"]
+    assert "Real orders on Alpaca" in table.columns
+    assert any("No results yet" in i.value for i in at.info)
