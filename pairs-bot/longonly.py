@@ -117,6 +117,22 @@ def prime_bars(timeframe_minutes: int = 15) -> int:
     return math.ceil((WARMUP + 20) * BAR.total_seconds() / 60 / timeframe_minutes)
 
 
+MAX_GAP = pd.Timedelta(days=7)    # a longer hole in a symbol's prices means broken history
+
+
+def usable(s: pd.Series) -> pd.Series:
+    """A symbol's closes after its last hole longer than a week.
+
+    A feed can miss months (Alpaca's SOL history has a 417-day hole). A position held across a hole books a
+    fake profit or loss, so only the history after the last one is used. Weekends and holidays are shorter.
+    """
+    s = s.dropna()
+    if len(s) < 2:
+        return s
+    gaps = np.flatnonzero((s.index[1:] - s.index[:-1]) > MAX_GAP)
+    return s.iloc[gaps[-1] + 1:] if len(gaps) else s
+
+
 def ema(x: np.ndarray, span: int) -> float:
     a = 2.0 / (span + 1)
     w = (1 - a) ** np.arange(len(x) - 1, -1, -1)
@@ -274,7 +290,7 @@ def simulate(bars: pd.DataFrame, strategy: str, symbols: list[str] | None = None
     symbols = [s for s in (symbols or list(bars.columns)) if s in bars and bars[s].notna().any()]
     sleeve = Sleeve(strategy)
     is_hold = strategy == "hold"
-    data = {s: bars[s].dropna() for s in symbols}
+    data = {s: usable(bars[s]) for s in symbols}
     arrays = {s: d.to_numpy(float) for s, d in data.items()}
     where = {s: {t: k for k, t in enumerate(d.index)} for s, d in data.items()}
     costs = {s: scaled(costs_for(s), cost_mult) for s in symbols}
@@ -642,7 +658,7 @@ class LongBook:
         for sym in self.symbols:
             if sym not in bars or sym not in tradable or sym not in prices:
                 continue
-            s = bars[sym].dropna()
+            s = usable(bars[sym])
             if s.empty:
                 continue
             bar_ts = s.index[-1].timestamp()

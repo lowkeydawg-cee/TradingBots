@@ -212,3 +212,15 @@ def test_old_database_without_the_new_tables_still_loads(tmp_path):
     book = asyncio.run(run())
     assert book.sleeves["trend"].positions["BTCUSD"].qty == 2
     assert lo.sleeve_rows(str(path)) == []
+
+
+def test_a_hole_in_the_price_history_is_cut_off_not_traded_across():
+    x = up_then_down()
+    s = series(x)
+    holed = pd.concat([s.iloc[:200], s.iloc[200:].set_axis(s.index[200:] + pd.Timedelta(days=417))])
+    assert len(lo.usable(holed)) == len(x) - 200
+    bars = lo.to_bars(holed)
+    res = lo.simulate(bars, "hold")
+    assert all(t.opened_at > holed.index[199] for t in res.trades)       # nothing bought before the hole
+    weekend = pd.concat([s.iloc[:200], s.iloc[200:].set_axis(s.index[200:] + pd.Timedelta(days=3))])
+    assert len(lo.usable(weekend)) == len(x)                             # a weekend or holiday is not a hole
