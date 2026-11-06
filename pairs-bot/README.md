@@ -45,7 +45,7 @@ pip install -r requirements-dev.txt
 
 # 1. Try everything offline (no keys, no market hours)
 python main.py --mode sim --fast --cycles 800
-streamlit run app.py                         # in another terminal
+streamlit run app.py                         # in another terminal; "Approaches" in the sidebar compares strategies
 
 # 2. Paper trading
 cp .env.example .env                          # add your PAPER keys
