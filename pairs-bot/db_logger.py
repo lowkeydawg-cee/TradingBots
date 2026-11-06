@@ -150,7 +150,8 @@ CREATE TABLE IF NOT EXISTS long_trades (
     entry_note  TEXT,
     closed_at   REAL, exit REAL,
     gross_pnl   REAL, costs REAL, net_pnl REAL,
-    exit_reason TEXT
+    exit_reason TEXT,
+    last_price  REAL, last_ts REAL    -- newest price while open, for its live value
 );
 CREATE INDEX IF NOT EXISTS ix_long_open ON long_trades(strategy, symbol, closed_at);
 CREATE INDEX IF NOT EXISTS ix_signals_ts ON signals(ts);
@@ -165,6 +166,8 @@ MIGRATIONS = [
     ("pair_trades", "pair", "TEXT"),
     ("orders", "expected_price", "REAL"),  # mid / decision price at order time
     ("orders", "slippage_bps", "REAL"),    # what the fill cost vs. expected (+ = paid more)
+    ("long_trades", "last_price", "REAL"), # newest price of an open buy-only position, for its live value
+    ("long_trades", "last_ts", "REAL"),
 ]
 
 

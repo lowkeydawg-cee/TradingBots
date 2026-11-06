@@ -67,7 +67,7 @@ def _read(conn: sqlite3.Connection, sql: str) -> pd.DataFrame:
 
 def load_trades(path: str) -> pd.DataFrame:
     """One row per demo trade, open or closed: approach, market, what, opened, closed, net, result."""
-    cols = ["approach", "market", "what", "opened_at", "closed_at", "net_pnl", "gross_pnl", "costs", "note"]
+    cols = ["approach", "market", "what", "opened_at", "closed_at", "net_pnl", "gross_pnl", "costs", "note", "open_pnl"]
     empty = pd.DataFrame(columns=cols + ["result"])
     if not Path(path).exists():
         return empty
@@ -77,7 +77,10 @@ def load_trades(path: str) -> pd.DataFrame:
                             "exit_reason AS note FROM shadow_trades WHERE grade IN ('STRONG', 'RISKY')")
         sectors = _read(conn, "SELECT pair, sector FROM opportunities GROUP BY pair")
         longs = _read(conn, "SELECT strategy, symbol AS what, market, opened_at, closed_at, gross_pnl, costs, net_pnl, "
-                            "COALESCE(exit_reason, entry_note) AS note FROM long_trades")
+                            "COALESCE(exit_reason, entry_note) AS note, entry, qty, last_price FROM long_trades")
+        if longs.empty:                        # a database from before last_price existed
+            longs = _read(conn, "SELECT strategy, symbol AS what, market, opened_at, closed_at, gross_pnl, costs, "
+                                "net_pnl, COALESCE(exit_reason, entry_note) AS note FROM long_trades")
     finally:
         conn.close()
     frames = []
@@ -88,10 +91,13 @@ def load_trades(path: str) -> pd.DataFrame:
         frames += [strong, pairs.assign(approach="Pairs (all signals)")]
     if not longs.empty:
         longs["approach"] = longs["strategy"].map(lambda s: NAMES.get(s, s.title()))
+        if "last_price" in longs:              # live value if sold now: price move minus buy and (about the same) sell cost
+            held = longs["closed_at"].isna() & longs["last_price"].notna()
+            longs.loc[held, "open_pnl"] = ((longs["last_price"] - longs["entry"]) * longs["qty"] - 2 * longs["costs"])[held]
         frames.append(longs)
     if not frames:
         return empty
-    out = pd.concat([f[cols] for f in frames], ignore_index=True)
+    out = pd.concat([f.reindex(columns=cols) for f in frames], ignore_index=True)
     out["result"] = np.where(out["closed_at"].isna(), "open", np.where(out["net_pnl"] > 0, "won", "lost"))
     return out.sort_values("opened_at", ignore_index=True)
 
@@ -101,8 +107,12 @@ def _drawdown(net: pd.Series) -> float:
     return float((curve - curve.cummax().clip(lower=0)).min()) if len(curve) else 0.0
 
 
+BOARD_COLUMNS = ["approach", "trades", "win rate", "net", "per trade", "avg win", "avg loss", "profit factor",
+                 "worst drawdown", "costs", "open now"]
+
+
 def scoreboard(trades: pd.DataFrame) -> pd.DataFrame:
-    """One row per approach, best net first. Only closed trades count."""
+    """One row per approach, best first. ``net`` is closed trades; ``open P&L`` is what open ones are worth now."""
     closed = trades[trades["result"] != "open"].sort_values("closed_at")
     rows = []
     for name, g in closed.groupby("approach"):
@@ -123,7 +133,12 @@ def scoreboard(trades: pd.DataFrame) -> pd.DataFrame:
                          "open now": int(((trades["approach"] == name) & (trades["result"] == "open")).sum())})
     if not rows:
         return pd.DataFrame()
-    return pd.DataFrame(rows).sort_values(["net", "trades"], ascending=False, ignore_index=True)
+    board = pd.DataFrame(rows).reindex(columns=BOARD_COLUMNS)    # same columns even when nothing has closed
+    board["trades"] = board["trades"].fillna(0).astype(int)
+    open_pnl = trades.groupby("approach")["open_pnl"].sum(min_count=1)
+    board["open P&L"] = board["approach"].map(open_pnl).fillna(0.0)
+    board["total"] = board["net"] + board["open P&L"]
+    return board.sort_values(["total", "trades"], ascending=False, ignore_index=True)
 
 
 def equity_curves(trades: pd.DataFrame) -> pd.DataFrame:
@@ -146,8 +161,11 @@ def by_market(trades: pd.DataFrame) -> pd.DataFrame:
 def verdict(board: pd.DataFrame) -> tuple[str, list[str]]:
     """A one-line headline and the reasons behind it, in plain words."""
     if board.empty or board["trades"].sum() == 0:
-        return ("No demo trade has closed yet.",
-                ["Start the watcher and leave it running: it trades every approach with demo money on each scan."])
+        lines = ["Start the watcher and leave it running: it trades every approach with demo money on each scan."]
+        if not board.empty and board["open now"].sum():
+            lines = [f"{int(board['open now'].sum())} demo positions are open. Results start once they sell; "
+                     "the scoreboard below already counts what they're worth now."]
+        return "No demo trade has closed yet.", lines
     total = int(board.loc[board["approach"] != "Pairs (STRONG)", "trades"].sum())   # STRONG is inside "all signals"
     hold = board[board["approach"] == "Hold"]
     lines = []
@@ -162,13 +180,13 @@ def verdict(board: pd.DataFrame) -> tuple[str, list[str]]:
     if total < ENOUGH_TRADES:
         lines.append(f"{total} closed trades in total. Keep the demos running until about {ENOUGH_TRADES} before "
                      f"switching anything; each approach needs about {MIN_TRADES} of its own to mean much.")
-    if not hold.empty and hold.iloc[0]["trades"] > 0:
-        h = hold.iloc[0]["net"]
-        beat = board[(board["approach"] != "Hold") & (board["net"] > h) & (board["trades"] > 0)]["approach"].tolist()
-        lines.append("Beating the buy-and-hold benchmark: " + (", ".join(beat) if beat else "none so far") + ".")
+    if not hold.empty and (hold.iloc[0]["trades"] > 0 or hold.iloc[0]["open P&L"] != 0):
+        h = hold.iloc[0]["total"]
+        beat = board[(board["approach"] != "Hold") & (board["total"] > h) & (board["trades"] > 0)]["approach"].tolist()
+        lines.append(f"Buy-and-hold is at {money(h)} counting what it holds now. Beating it, open positions "
+                     "included: " + (", ".join(beat) if beat else "none so far") + ".")
     elif not hold.empty:
-        lines.append("The buy-and-hold benchmark is still holding, so it only gets a score when it sells "
-                     "(a replay closes it at the end).")
+        lines.append("Buy-and-hold has no live price yet, so it can't be compared until the next scan.")
     for _, r in board.iterrows():
         if r["trades"] >= MIN_TRADES and r["net"] < 0 and r.get("costs", 0) > -r["net"]:
             lines.append(f"{r['approach']} lost ${-r['net']:,.2f}, less than the ${r['costs']:,.2f} it paid in costs: "

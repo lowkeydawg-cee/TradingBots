@@ -101,24 +101,30 @@ st.markdown("**Scoreboard**")
 cards = board.head(6)
 for col, (_, r) in zip(st.columns(len(cards)), cards.iterrows()):
     with col.container(border=True):
-        st.metric(r["approach"], money(r["net"], 0))
+        st.metric(r["approach"], money(r["total"], 0))
         note = f"{int(r['trades'])} trades, {r['win rate']:.0%} won" if r["trades"] else "no closed trades yet"
         if r["trades"] and r["trades"] < MIN_TRADES:
             note += " · too few to judge"
         if r.get("open now"):
             note += f" · {int(r['open now'])} open"
+            if r["open P&L"]:
+                note += f" ({money(r['open P&L'], 0)} now)"
         st.caption(note)
 
 table = board.assign(**{"win rate": board["win rate"] * 100}).rename(columns={"approach": "Approach", "trades": "Trades", "win rate": "Won", "net": "Net $",
                               "per trade": "$ per trade", "avg win": "Avg win $", "avg loss": "Avg loss $",
                               "profit factor": "Profit factor", "worst drawdown": "Worst drawdown $",
-                              "costs": "Costs paid $", "open now": "Open now"})
+                              "costs": "Costs paid $", "open now": "Open now",
+                              "open P&L": "Open P&L $", "total": "Total $"})
+first = ["Approach", "Total $", "Net $", "Open P&L $", "Trades", "Won"]
+table = table[first + [c for c in table.columns if c not in first]]
 st.dataframe(table, hide_index=True, width="stretch", column_config={
     "Won": st.column_config.NumberColumn(format="%.0f%%"),
     **{c: st.column_config.NumberColumn(format="%.2f") for c in
-       ("Net $", "$ per trade", "Avg win $", "Avg loss $", "Profit factor", "Worst drawdown $", "Costs paid $")},
+       ("Total $", "Open P&L $", "Net $", "$ per trade", "Avg win $", "Avg loss $", "Profit factor", "Worst drawdown $", "Costs paid $")},
 })
-st.caption("Profit factor is money won ÷ money lost: above 1 makes money. Worst drawdown is the deepest fall "
+st.caption("Total = closed trades (Net) plus what open positions are worth if sold now (Open P&L, after costs). "
+           "Profit factor is money won ÷ money lost: above 1 makes money. Worst drawdown is the deepest fall "
            "from a high point, the pain you'd have sat through.")
 
 curves = equity_curves(trades)

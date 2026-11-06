@@ -236,9 +236,10 @@ class LongBook:
                 if action == "buy" and not held:
                     qty = NOTIONAL / price
                     tid = await self.db._write(
-                        "INSERT INTO long_trades (strategy, symbol, market, opened_at, entry, qty, entry_note, costs) "
-                        "VALUES (?,?,?,?,?,?,?,?)",
-                        (strat, sym, market_of(sym), bar_ts, price, qty, why, sum(costs.order_cost(qty, price, "buy"))))
+                        "INSERT INTO long_trades (strategy, symbol, market, opened_at, entry, qty, entry_note, costs, "
+                        "last_price, last_ts) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (strat, sym, market_of(sym), bar_ts, price, qty, why, sum(costs.order_cost(qty, price, "buy")),
+                         price, bar_ts))
                     self.open[key] = (tid, Holding(price, price), qty)
                     events.append(f"{strat} bought {sym} at {price:,.2f} ({why})")
                 elif action == "sell" and held:
@@ -251,9 +252,12 @@ class LongBook:
                         "WHERE id=?", (bar_ts, price, round(gross, 2), round(total_costs, 2),
                                        round(gross - total_costs, 2), why, tid))
                     del self.open[key]
+                    held = None
                     events.append(f"{strat} sold {sym} at {price:,.2f} ({why}), net ${gross - total_costs:+,.2f}")
+            if any(k[1] == sym for k in self.open):          # live value of what's still held
+                await self.db._write("UPDATE long_trades SET last_price=?, last_ts=? WHERE symbol=? AND closed_at IS NULL",
+                                     (price, bar_ts, sym))
         return events
-
 
     async def close_all(self, closes: pd.DataFrame, reason: str = "end of replay (marked at last price)") -> None:
         """Mark every open demo position at its last price, so a replay's comparison includes them (hold too)."""
