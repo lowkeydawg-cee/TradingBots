@@ -71,7 +71,7 @@ from config import ConfigError, Settings, load_settings
 from db_logger import DBLogger
 from execution import pair_pnl, plan_pair
 from insights import Insights
-from longonly import LongBook
+from longonly import LongBook, prime_bars
 from notify import Notifier
 from scanner import ALL_SECTORS, CRYPTO, MARKET_OF, alpaca_crypto
 from strategy import Action, Position, compute_spread_stats, decide
@@ -531,6 +531,11 @@ async def amain(argv: list[str] | None = None) -> None:
                       watched_pairs={f"{a}/{b}" for a, b in base.all_pairs})
     await watcher.book.load()
     await watcher.long_book.load()
+    if args.source == "alpaca":                 # the buy-only rules need about 25 days of history to start deciding
+        try:
+            watcher.long_book.prime(await source.closes(prime_bars(args.timeframe)))
+        except Exception as exc:
+            log.warning("buy-only history unavailable, they start deciding once enough builds up: %s", exc)
     log.info("watching %d pairs in %d sectors on %d-minute bars", len(watcher.pairs(every=True)),
              len(source.sectors), args.timeframe)
     scans = 0

@@ -28,22 +28,32 @@ COMPARE = (
      "Markets go sideways and related prices move together", "One of the pair has real news and the link breaks",
      "US stocks and funds; crypto as demo only", "Yes on stocks (buys one, sells the other short); no on crypto"),
     ("Trend", "A price that's rising keeps rising",
-     "The 20-bar average is above the 100-bar average and price is above both",
-     "The averages cross back, or price falls 3 four-hour swings from its high",
+     "On a closed 4-hour bar: the market is rising, the 20-bar average is above the 100-bar one, price above both",
+     "The averages cross back, the market turns down, or price falls 2 days of normal movement from its high",
      "Long one-way moves up", "Choppy markets: it buys late and sells late, paying fees each time",
      "Crypto, gold, silver, gold miners", "Yes (buy only)"),
-    ("Dip", "A sharp fall inside an uptrend bounces back",
-     "RSI drops under 30 while price is still above its 200-bar average",
-     "RSI recovers above 55, or it falls 2 more swings (stop), or a day passes",
+    ("Dip", "A sharp fall in a rising market bounces back",
+     "RSI drops under 30 while the market is rising and calm (not in a wild swing)",
+     "RSI recovers above 55, it falls 1.5 more days of movement (stop), the market turns down, or 2 days pass",
      "Rising markets with quick pullbacks", "A real crash: the dip keeps dipping",
      "Crypto, gold, silver, gold miners", "Yes (buy only)"),
     ("Breakout", "A new high leads to more highs",
-     "Price beats its highest close of the last day",
-     "Price falls 3 four-hour swings from its high (trailing stop)",
+     "Price clears its 5-day high by half a normal bar's move, in a rising market; waits a day after a failed one",
+     "Price falls 2 days of normal movement from its high (trailing stop), or the market turns down",
      "Strong news-driven runs", "False breakouts that reverse straight away",
      "Crypto, gold, silver, gold miners", "Yes (buy only)"),
-    ("Hold", "Nothing: it's the yardstick", "At the start", "Never (marked at the last price at the end of a replay)",
+    ("Hold", "Nothing: it's the yardstick", "At the start, the same money spread evenly", "Never (marked at the last price at the end of a replay)",
      "Markets that go up", "Markets that go down", "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+)
+
+# The risk rules every buy-only approach (not pairs) runs under, from governance.py, for the page.
+RISK_RULES = (
+    "Each approach has its own $10,000 demo account, so they're compared on equal terms.",
+    "Size: each trade risks 1% of the account, measured as two days of the coin's normal movement. "
+    "Wild coins get smaller positions than calm ones.",
+    "Caps: at most 25% of the account in one asset, 50% in crypto together, and 20% always kept in cash.",
+    "Losing streaks: 5% below its high point it trades half size (caution), 10% below it stops buying (defense), "
+    "15% below it sells everything and stops (stopped) until someone restarts it. It never bets more to win back losses.",
 )
 
 NAMES = {"trend": "Trend", "dip": "Dip", "breakout": "Breakout", "hold": "Hold"}
@@ -193,3 +203,31 @@ def verdict(board: pd.DataFrame) -> tuple[str, list[str]]:
                          "the idea is roughly right, but it trades too often for the fees.")
     lines.append("Demo money on past or live prices, after costs. This is what happened, not a forecast.")
     return head, lines
+
+
+def _table(path: str, sql: str) -> pd.DataFrame:
+    if not Path(path).exists():
+        return pd.DataFrame()
+    conn = _connect(path)
+    try:
+        return _read(conn, sql)
+    finally:
+        conn.close()
+
+
+def load_sleeves(path: str) -> pd.DataFrame:
+    """Each buy-only demo account: value, how far below its high, and its risk state."""
+    return _table(path, "SELECT strategy, value, drawdown, state, updated_at FROM long_sleeves ORDER BY strategy")
+
+
+def latest_decisions(path: str) -> pd.DataFrame:
+    """What each buy-only approach last decided on each market, and why: the 'why it did nothing' view."""
+    return _table(path, "SELECT d.strategy, d.symbol, d.action, d.reason, d.state, d.ts FROM long_decisions d "
+                        "JOIN (SELECT strategy, symbol, MAX(id) AS id FROM long_decisions GROUP BY strategy, symbol) m "
+                        "ON d.id = m.id ORDER BY d.strategy, d.symbol")
+
+
+def recent_actions(path: str, limit: int = 50) -> pd.DataFrame:
+    """The latest buys, sells and refused trades (waits left out), newest first."""
+    return _table(path, "SELECT ts, strategy, symbol, action, reason, price, qty, state FROM long_decisions "
+                        f"WHERE action IN ('buy', 'sell', 'refused') ORDER BY id DESC LIMIT {int(limit)}")

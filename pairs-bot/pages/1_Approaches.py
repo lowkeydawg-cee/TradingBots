@@ -13,7 +13,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from approaches import COMPARE, COMPARE_COLUMNS, MIN_TRADES, by_market, equity_curves, load_trades, money, scoreboard, verdict
+from approaches import (COMPARE, COMPARE_COLUMNS, MIN_TRADES, RISK_RULES, by_market, equity_curves, latest_decisions,
+                        load_sleeves, load_trades, money, recent_actions, scoreboard, verdict)
 from config import ConfigError, load_settings
 
 st.set_page_config(page_title="Approaches", page_icon="🧭", layout="wide")
@@ -58,7 +59,10 @@ st.caption("Pairs bets on two prices coming back together. The other four only b
            "gold for real. Hold does nothing clever: it's the yardstick the others have to beat.")
 st.table(pd.DataFrame(COMPARE, columns=COMPARE_COLUMNS).set_index("Approach"))
 st.caption("Every approach pays the same trading costs (about 0.3% per crypto order), so one that trades a lot "
-           "needs bigger wins to come out ahead.")
+           "needs bigger wins to come out ahead. The buy-only ones decide once every four hours, on closed candles.")
+with st.expander("Risk rules the buy-only approaches run under"):
+    for rule in RISK_RULES:
+        st.markdown(f"- {md(rule)}")
 
 st.divider()
 st.subheader("How they've done")
@@ -91,7 +95,39 @@ with st.container(border=True):
     for line in reasons:
         st.markdown(f"- {md(line)}")
 
+STATE_ICON = {"normal": "🟢", "caution": "🟡", "defense": "🟠", "stopped": "🔴"}
+sleeves = load_sleeves(path)
+if not sleeves.empty:
+    st.markdown("**Risk state of each buy-only account**")
+    for col, (_, r) in zip(st.columns(len(sleeves)), sleeves.iterrows()):
+        with col.container(border=True):
+            st.metric(f"{STATE_ICON.get(r['state'], '')} {r['strategy'].title()}", f"${r['value']:,.0f}")
+            st.caption(f"{r['state']} · {r['drawdown']:.1%} below its high")
+
+
+def why_nothing() -> None:
+    """The last decision for every approach and market, so a quiet day explains itself."""
+    last = latest_decisions(path)
+    if last.empty:
+        st.caption("No buy-only decisions yet. They're made once every four hours, when a candle closes.")
+        return
+    when = pd.to_datetime(last["ts"].max(), unit="s", utc=True)
+    st.caption(f"What each approach decided on the last closed 4-hour candle ({when:%d %b %H:%M} UTC), and why.")
+    st.dataframe(last.drop(columns="ts").rename(columns={"strategy": "Approach", "symbol": "Market", "action": "Did",
+                                                         "reason": "Why", "state": "Risk state"}),
+                 hide_index=True, width="stretch")
+    acts = recent_actions(path)
+    if not acts.empty:
+        st.markdown("**Latest buys, sells and refused trades**")
+        acts = acts.assign(ts=pd.to_datetime(acts["ts"], unit="s", utc=True)).round({"price": 2, "qty": 6})
+        st.dataframe(acts.rename(columns={"ts": "When", "strategy": "Approach", "symbol": "Market", "action": "Did",
+                                          "reason": "Why", "price": "Price", "qty": "Qty", "state": "Risk state"}),
+                     hide_index=True, width="stretch")
+
+
 if board.empty:
+    st.subheader("Why it hasn't traded yet")
+    why_nothing()
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -141,8 +177,22 @@ if not curves.empty:
 # Analysis
 # ---------------------------------------------------------------------------
 st.subheader("Analysis")
-t_market, t_when, t_pairs, t_replay, t_log = st.tabs(
-    ["By market", "When to trade", "Pairs detail", "Replay review", "Trade log"])
+t_why, t_valid, t_market, t_when, t_pairs, t_replay, t_log = st.tabs(
+    ["Why it did (or didn't) trade", "Validation", "By market", "When to trade", "Pairs detail", "Replay review",
+     "Trade log"])
+
+with t_why:
+    why_nothing()
+
+with t_valid:
+    valid_md = HERE / "review" / "validation.md"
+    if valid_md.exists():
+        made = pd.Timestamp(valid_md.stat().st_mtime, unit="s")
+        st.caption(f"From the last `python longonly.py --validate` run ({made:%d %b %H:%M}).")
+        st.markdown(md(valid_md.read_text(encoding="utf-8")))
+    else:
+        st.caption("Run `python longonly.py --validate --source alpaca --days 365` to test the buy-only approaches on a "
+                   "year of real prices: split by time, stress-tested, with pass/fail gates.")
 
 with t_market:
     m = by_market(trades)

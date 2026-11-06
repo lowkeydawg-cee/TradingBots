@@ -167,21 +167,27 @@ trades: a hint for where to look, not a forecast.
 **Buy-only strategies next to pairs.** Alpaca can't short crypto, so pairs
 trading can't really run there. The watcher also runs four buy-only approaches
 with demo money on BTC, ETH, SOL, LTC, gold (GLD), silver (SLV) and gold miners
-(GDX): **trend** (buy when the 20-bar average is above the 100-bar one, sell
-when it turns or on a trailing stop), **dip** (buy a sharp RSI dip inside an
-uptrend, sell on the bounce, a stop or after a day), **breakout** (buy a new
-one-day high, trailing stop) and **hold** (buy once: the benchmark). Ask Jarvis
-"which strategy is working?" or read the comparison at the end of
-`review/review.md`. To test them on past prices right away:
-`python longonly.py --source alpaca --days 60` (crypto, no keys needed; add
-`--symbols BTCUSD ETHUSD GLD SLV` once Alpaca keys are in `.env`).
+(GDX). They decide once every four hours on closed candles, and only buy while
+the market itself is rising: **trend** (20-bar average above the 100-bar one),
+**dip** (a sharp RSI dip in a rising, calm market), **breakout** (a clear new
+5-day high, with a pause after a failed one) and **hold** (buy once: the
+benchmark). Each has its own $10,000 demo account run by `governance.py`:
+trades are sized from the coin's own volatility (1% of the account at risk),
+capped per asset, in crypto overall and by a 20% cash reserve, and the account
+steps down to half size, then no new buys, then sells everything as it falls
+5%, 10% and 15% from its high. `RISK.md` explains every rule. To test them on a
+year of real prices, split by time and stress-tested with pass/fail gates:
+`python longonly.py --validate --source alpaca --days 365` (crypto, no keys
+needed; add `--symbols BTCUSD ETHUSD GLD SLV` once Alpaca keys are in `.env`).
 
 **The Approaches page.** `streamlit run app.py`, then pick **Approaches** in
 the sidebar. It puts every demo approach on one page: a one-line verdict
 (who's ahead, and whether there are enough trades to trust it), a scoreboard
 (net after costs, win rate, profit factor, worst drawdown), demo money over
-time, and tabs for results by market, the best times to trade, the pairs
-detail, the last replay review, every trade, and how each approach works.
+time, the risk state of each buy-only account, and tabs for why each approach
+did (or didn't) trade on the last candle, the last validation report, results
+by market, the best times to trade, the pairs detail, the last replay review,
+and every trade.
 Switch between the live watcher and the last replay at the top.
 
 **One click, and a warning if it stops.** Double-click `start-trading.bat`: it
