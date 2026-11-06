@@ -18,14 +18,34 @@ from scanner import MARKET_OF
 MIN_TRADES = 30          # below this an approach's record is too short to judge
 ENOUGH_TRADES = 100      # the total at which picking a winner starts to mean something
 
-ABOUT = {
-    "Pairs (STRONG)": "Two related prices drift apart; bet they come back together. Only the best-graded signals.",
-    "Pairs (all signals)": "The same pairs rule on every STRONG and RISKY signal, to check that the grading helps.",
-    "Trend": "Buy when the 20-bar average is above the 100-bar average; sell when it flips or a trailing stop hits.",
-    "Dip": "Buy a sharp dip (RSI under 30) while the long trend is up; sell when it bounces, stops out or after a day.",
-    "Breakout": "Buy when price makes a new one-day high; sell on a trailing stop.",
-    "Hold": "Buy once and keep it. The benchmark: an approach that can't beat this isn't worth running.",
-}
+# How the approaches differ, one row each, for the page's comparison table.
+COMPARE_COLUMNS = ("Approach", "Bets on", "Gets in when", "Gets out when", "Does well when", "Does badly when",
+                   "Markets", "Real orders on Alpaca")
+COMPARE = (
+    ("Pairs", "Two related prices that drifted apart coming back together",
+     "The gap between them is 2+ normal swings wide (z-score ±2), graded STRONG",
+     "The gap closes to ±0.5, or widens past ±3.5 (stop), or takes too long",
+     "Markets go sideways and related prices move together", "One of the pair has real news and the link breaks",
+     "US stocks and funds; crypto as demo only", "Yes on stocks (buys one, sells the other short); no on crypto"),
+    ("Trend", "A price that's rising keeps rising",
+     "The 20-bar average is above the 100-bar average and price is above both",
+     "The averages cross back, or price falls 3 four-hour swings from its high",
+     "Long one-way moves up", "Choppy markets: it buys late and sells late, paying fees each time",
+     "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+    ("Dip", "A sharp fall inside an uptrend bounces back",
+     "RSI drops under 30 while price is still above its 200-bar average",
+     "RSI recovers above 55, or it falls 2 more swings (stop), or a day passes",
+     "Rising markets with quick pullbacks", "A real crash: the dip keeps dipping",
+     "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+    ("Breakout", "A new high leads to more highs",
+     "Price beats its highest close of the last day",
+     "Price falls 3 four-hour swings from its high (trailing stop)",
+     "Strong news-driven runs", "False breakouts that reverse straight away",
+     "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+    ("Hold", "Nothing: it's the yardstick", "At the start", "Never (marked at the last price at the end of a replay)",
+     "Markets that go up", "Markets that go down", "Crypto, gold, silver, gold miners", "Yes (buy only)"),
+)
+
 NAMES = {"trend": "Trend", "dip": "Dip", "breakout": "Breakout", "hold": "Hold"}
 
 
