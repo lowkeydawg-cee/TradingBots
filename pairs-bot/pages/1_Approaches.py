@@ -43,7 +43,7 @@ def md(text: str) -> str:
 
 
 HERE = Path(__file__).resolve().parents[1]
-SOURCES = {"Live demo (the watcher)": bot_db(), "Replay (past prices)": str(HERE / "replay.db")}
+SOURCES = {"Live demo (the watcher)": bot_db(), "Replay (past prices)": os.environ.get("PAIRS_REPLAY_DB", str(HERE / "replay.db"))}
 available = {k: v for k, v in SOURCES.items() if Path(v).exists()}
 
 st.title("🧭 Approaches")
