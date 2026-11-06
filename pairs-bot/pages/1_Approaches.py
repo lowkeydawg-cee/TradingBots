@@ -13,8 +13,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from approaches import (COMPARE, COMPARE_COLUMNS, MIN_TRADES, RISK_RULES, by_market, equity_curves, latest_decisions,
-                        load_sleeves, load_trades, money, recent_actions, scoreboard, verdict)
+from approaches import (COMPARE, COMPARE_COLUMNS, MIN_TRADES, RISK_RULES, by_market, equity_curves, holdings,
+                        latest_brief, latest_decisions, load_sleeves, load_trades, markets_watched, money,
+                        recent_actions, scoreboard, verdict)
 from config import ConfigError, load_settings
 
 st.set_page_config(page_title="Approaches", page_icon="🧭", layout="wide")
@@ -52,14 +53,45 @@ st.caption("Every strategy the bot tries with demo money, scored the same way af
            "Use it to decide which approach is worth keeping. No real orders are placed by any of these.")
 
 # ---------------------------------------------------------------------------
-# How they differ: always shown, even before any trade
+# Right now: what it holds, in which market, and what it sees. The first thing on the page.
 # ---------------------------------------------------------------------------
-st.subheader("How the approaches differ")
-st.caption("Pairs bets on two prices coming back together. The other four only buy, so they can trade crypto and "
-           "gold for real. Hold does nothing clever: it's the yardstick the others have to beat.")
-st.table(pd.DataFrame(COMPARE, columns=COMPARE_COLUMNS).set_index("Approach"))
-st.caption("Every approach pays the same trading costs (about 0.3% per crypto order), so one that trades a lot "
-           "needs bigger wins to come out ahead. The buy-only ones decide once every four hours, on closed candles.")
+st.subheader("Right now")
+live_db = SOURCES["Live demo (the watcher)"]
+if not Path(live_db).exists():
+    st.info("Nothing is running yet. Double-click start-trading.bat in the pairs-bot folder to start the demo.")
+else:
+    held = holdings(live_db)
+    watched = markets_watched(live_db)
+    next_bar = (pd.Timestamp.now(tz="UTC").floor("4h") + pd.Timedelta(hours=4)).tz_convert(None)
+    local = pd.Timestamp.now().floor("s") + (next_bar - pd.Timestamp.now(tz="UTC").tz_convert(None))
+    st.caption(f"Watching: {', '.join(watched) or 'nothing yet'}. Demo money only. "
+               f"Next buy-or-sell decision at about {local:%H:%M} your time.")
+    if held.empty:
+        st.markdown("**Holding nothing right now.** The reasons are under Why it did (or didn't) trade, below.")
+    else:
+        value, profit = held["Value"].sum(), held["Profit if sold now"].sum()
+        for col, (label, shown) in zip(st.columns(3), (("Open positions", str(len(held))), ("Worth now", f"${value:,.0f}"),
+                                                       ("Profit if sold now", money(profit, 0)))):
+            col.metric(label, shown)
+        st.dataframe(held.assign(Since=held["Since"].dt.strftime("%d %b %H:%M UTC")), hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(format="$%.2f")
+                                    for c in ("Bought at", "Price now", "Value", "Profit if sold now")})
+    brief = latest_brief(live_db)
+    if brief:
+        with st.container(border=True):
+            st.markdown("**What the market looks like**")
+            for line in brief:
+                st.markdown(f"- {md(line.lstrip('- '))}")
+
+# ---------------------------------------------------------------------------
+# How they differ: always there, folded away so the live picture comes first
+# ---------------------------------------------------------------------------
+with st.expander("How the approaches differ"):
+    st.caption("Pairs bets on two prices coming back together. The other four only buy, so they can trade crypto and "
+               "gold for real. Hold does nothing clever: it's the yardstick the others have to beat.")
+    st.table(pd.DataFrame(COMPARE, columns=COMPARE_COLUMNS).set_index("Approach"))
+    st.caption("Every approach pays the same trading costs (about 0.3% per crypto order), so one that trades a lot "
+               "needs bigger wins to come out ahead. The buy-only ones decide once every four hours, on closed candles.")
 with st.expander("Risk rules the buy-only approaches run under"):
     for rule in RISK_RULES:
         st.markdown(f"- {md(rule)}")

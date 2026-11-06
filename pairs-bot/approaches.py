@@ -231,3 +231,29 @@ def recent_actions(path: str, limit: int = 50) -> pd.DataFrame:
     """The latest buys, sells and refused trades (waits left out), newest first."""
     return _table(path, "SELECT ts, strategy, symbol, action, reason, price, qty, state FROM long_decisions "
                         f"WHERE action IN ('buy', 'sell', 'refused') ORDER BY id DESC LIMIT {int(limit)}")
+
+
+def holdings(path: str) -> pd.DataFrame:
+    """What the demo holds now: approach, coin, market, buy price, price now, value, and profit if sold now."""
+    held = _table(path, "SELECT strategy, symbol, market, opened_at, entry, qty, last_price, costs FROM long_trades "
+                        "WHERE closed_at IS NULL ORDER BY market, symbol, strategy")
+    if held.empty:
+        return held
+    now = held["last_price"].astype(float).fillna(held["entry"])
+    return pd.DataFrame({
+        "Approach": held["strategy"].map(lambda s: NAMES.get(s, s.title())), "What": held["symbol"],
+        "Market": held["market"], "Since": pd.to_datetime(held["opened_at"], unit="s", utc=True),
+        "Bought at": held["entry"], "Price now": now, "Value": held["qty"] * now,
+        "Profit if sold now": (now - held["entry"]) * held["qty"] - 2 * held["costs"]})
+
+
+def latest_brief(path: str) -> list[str]:
+    """The watcher's newest market read, as plain lines. The first line is its title and the last a disclaimer."""
+    brief = _table(path, "SELECT text FROM market_notes WHERE kind = 'brief' ORDER BY id DESC LIMIT 1")
+    return [] if brief.empty else str(brief["text"].iloc[0]).splitlines()[1:-1]
+
+
+def markets_watched(path: str) -> list[str]:
+    """The markets the last scan looked at, by name."""
+    seen = _table(path, "SELECT DISTINCT sector FROM opportunities WHERE ts >= (SELECT MAX(ts) - 1800 FROM opportunities)")
+    return sorted({MARKET_OF.get(s, s) for s in seen["sector"]}) if not seen.empty else []

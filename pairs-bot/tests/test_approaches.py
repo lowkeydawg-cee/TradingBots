@@ -182,3 +182,24 @@ async def test_heartbeat_alerts_once_when_the_watcher_stops_and_once_when_back(t
     assert phone.sent[-1] == "Trading watcher is scanning again." and len(phone.sent) == 2
     fresh = Heartbeat(str(tmp_path / "none.db"), phone)
     assert await fresh.check() == "waiting for the first scan"
+
+
+def test_right_now_shows_what_is_held_and_where(tmp_path, monkeypatch):
+    db = str(tmp_path / "w.db")
+    make_db(db, longs=[("hold", None)])
+    c = sqlite3.connect(db)
+    c.execute("UPDATE long_trades SET last_price = 110, costs = 1")
+    c.execute("INSERT INTO market_notes (ts, kind, mood, text) VALUES (1, 'brief', 'normal', 'Title\nMood: normal.\n- crypto: -1%\nNot a forecast.')")
+    c.commit()
+    c.close()
+    held = A.holdings(db)
+    assert list(held["What"]) == ["BTCUSD"] and list(held["Market"]) == ["Crypto"]
+    assert held["Value"].iloc[0] == 110 and held["Profit if sold now"].iloc[0] == 8    # up $10, less about 2 x $1 costs
+    assert A.latest_brief(db) == ["Mood: normal.", "- crypto: -1%"]
+    monkeypatch.setenv("PAIRS_DB_PATH", db)
+    monkeypatch.setenv("BOT_MODE", "sim")
+    st.cache_resource.clear()
+    at = AppTest.from_file(PAGE, default_timeout=60).run()
+    assert not at.exception
+    assert at.subheader[0].value == "Right now"
+    assert {m.label for m in at.metric} >= {"Open positions", "Worth now", "Profit if sold now"}
