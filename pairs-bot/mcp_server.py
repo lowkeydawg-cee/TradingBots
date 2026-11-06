@@ -32,6 +32,7 @@ Run it by hand to check it starts: ``python mcp_server.py`` (it waits for an MCP
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
 import time
@@ -52,7 +53,8 @@ def db_path() -> str:
 def _rows(sql: str, params: tuple = (), path: str | None = None) -> list[tuple]:
     path = path or db_path()
     if not Path(path).exists():
-        raise FileNotFoundError(f"no bot database at {path}; start the bot or the watcher first")
+        raise FileNotFoundError("No trading data yet. Start the demo: double-click start-trading.bat in the pairs-bot "
+                                "folder, or run python watcher.py --source alpaca --universe crypto.")
     conn = connect_readonly(path)
     try:
         return conn.execute(sql, params).fetchall()
@@ -263,17 +265,27 @@ def build_server():
     server = Server("trading", instructions="Paper-trading pairs bot: status, market watch, trades and controls. "
                                             "Demo money only; numbers are measured history, not predictions.")
 
-    @server.tool()
+    def tool(fn):
+        """Register a tool. With no database yet it says how to start, instead of failing."""
+        @functools.wraps(fn)
+        def guarded(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except FileNotFoundError as exc:
+                return str(exc)
+        return server.tool()(guarded)
+
+    @tool
     def get_bot_status() -> str:
         """Is the trading bot running, paused or halted? Equity, today's P&L and open trades."""
         return bot_status()
 
-    @server.tool()
+    @tool
     def get_market_watch(limit: int = 8) -> str:
         """The best trading opportunities right now (STRONG, RISKY, AVOID, WATCH) with their warnings."""
         return market_watch(limit)
 
-    @server.tool()
+    @tool
     def get_market_brief() -> str:
         """How the markets look right now (US stocks, world stocks, bonds, gold, oil, currencies, crypto):
         which market has the best conditions for trading now and which are closed, calm or stressed, today's
@@ -281,7 +293,7 @@ def build_server():
         Use for 'where should I trade', crypto, bitcoin, gold or currency questions. Descriptive, not a forecast."""
         return market_brief()
 
-    @server.tool()
+    @tool
     def get_timing_report(days: int = 7) -> str:
         """When each market (US stocks, world stocks, bonds, gold, oil, currencies, crypto) was good to trade over
         the last days: its best hours and days in local time, the STRONG entries you could have taken and what
@@ -295,7 +307,7 @@ def build_server():
         except FileNotFoundError as exc:
             return str(exc)
 
-    @server.tool()
+    @tool
     def get_strategy_comparison() -> str:
         """Which trading approach is doing best on demo money: the pairs book (STRONG only, STRONG + RISKY) against
         the buy-only strategies on crypto and gold (trend, dip, breakout, and buy-and-hold as the benchmark).
@@ -308,37 +320,37 @@ def build_server():
         except FileNotFoundError as exc:
             return str(exc)
 
-    @server.tool()
+    @tool
     def explain(pair: str) -> str:
         """Explain one pair, e.g. KO/PEP: its grade, statistics, warnings and what the bot did with it lately."""
         return explain_pair(pair)
 
-    @server.tool()
+    @tool
     def get_recent_trades(limit: int = 5) -> str:
         """The last closed trades, paper and demo."""
         return recent_trades(limit)
 
-    @server.tool()
+    @tool
     def get_profit() -> str:
         """Paper profit and loss today, this week and all time."""
         return profit_summary()
 
-    @server.tool()
+    @tool
     def get_demo_results() -> str:
         """Whether STRONG signals beat RISKY and AVOID ones in demo trading, and the best time of day."""
         return demo_results()
 
-    @server.tool()
+    @tool
     def pause() -> str:
         """Stop the bot opening new trades. Open trades still exit normally."""
         return pause_trading()
 
-    @server.tool()
+    @tool
     def resume() -> str:
         """Allow the bot to open new trades again."""
         return resume_trading()
 
-    @server.tool()
+    @tool
     def stop_everything(confirm: bool = False) -> str:
         """EMERGENCY: close every position and halt the bot. Needs confirm=true."""
         return emergency_stop(confirm)
