@@ -117,7 +117,9 @@ def scoreboard(trades: pd.DataFrame) -> pd.DataFrame:
                      "open now": int(((trades["approach"] == name) & (trades["result"] == "open")).sum())})
     for name in trades.loc[trades["result"] == "open", "approach"].unique():
         if name not in {r["approach"] for r in rows}:
-            rows.append({"approach": name, "trades": 0, "net": 0.0,
+            rows.append({"approach": name, "trades": 0, "win rate": np.nan, "net": 0.0, "per trade": np.nan,
+                         "avg win": np.nan, "avg loss": np.nan, "profit factor": np.nan, "worst drawdown": 0.0,
+                         "costs": 0.0,
                          "open now": int(((trades["approach"] == name) & (trades["result"] == "open")).sum())})
     if not rows:
         return pd.DataFrame()
