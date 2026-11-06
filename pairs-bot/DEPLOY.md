@@ -184,6 +184,15 @@ time, and tabs for results by market, the best times to trade, the pairs
 detail, the last replay review, every trade, and how each approach works.
 Switch between the live watcher and the last replay at the top.
 
+**One click, and a warning if it stops.** Double-click `start-trading.bat`: it
+starts the watcher, the dashboard and `heartbeat.py`. The heartbeat sends one
+phone alert when the watcher hasn't scanned for 45 minutes (crashed, or the
+laptop slept) and one when it's back. Alerts need `NTFY_TOPIC=` in `.env`
+(any private name, then subscribe to it in the free ntfy app); without it they
+only show in the heartbeat window. Open buy-only positions are valued at the
+latest price on every scan, so the Approaches page counts them (and the
+buy-and-hold yardstick) live, not only when they sell.
+
 **Is the data live?** If the watcher hasn't scanned for 2 hours, the brief,
 the market watch and the weekly report start with "NOT LIVE", and with
 "SIMULATED PRICES" when the last scan was the offline demo, so Jarvis can't
